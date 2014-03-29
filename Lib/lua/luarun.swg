@@ -175,6 +175,43 @@ typedef struct swig_elua_entry {
 
 #endif
 
+/*
+   Back in Lua 5.0, there was only lua_Number which was by default a double.
+
+   In Lua 5.1, they introduced integer C-APIs  (e.g. lua_pushinteger, lua_Integer (default long))
+   In Lua 5.2, they introduced unsigned C-APIs (e.g. lua_pushunsigned, lua_Unsigned (default unsigned long))
+   In Lua 5.3, they introduced a full blown native integer backend so
+   integers and floating point don't get converted needlessly.
+
+   In 5.3, if you've been using the APIs in 5.1+5.2, everything just
+   works and you may get a performance boost. Or at the very least, you
+   avoid a lot more overflow cases. 
+
+   (Also, Lua optionally provides architecture/platform specific
+   conversion routines to make conversion more efficient if you use their
+   APIs instead of casting yourself.)
+*/
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 501
+# define lua_Integer lua_Number
+# define lua_pushinteger lua_pushnumber
+# define lua_tointeger lua_tonumber
+# define lua_checkinteger lua_checknumber
+# define luaL_optinteger luaL_optnumber
+#endif
+
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 502
+# define lua_Unsigned lua_Integer
+# define lua_pushunsigned lua_pushinteger
+# define lua_tounsigned lua_tointeger
+# define luaL_checkunsigned lua_checkinteger
+# define luaL_optunsigned luaL_optinteger
+#endif
+
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 503
+# define lua_isinteger lua_isnumber
+#endif
+
+
 /* --------------------------------------------------------------------------
  * Helper functions for error handling
  * -------------------------------------------------------------------------- */
@@ -1544,7 +1581,11 @@ SWIG_Lua_InstallConstants(lua_State *L, swig_lua_const_info constants[]) {
     switch(constants[i].type) {
     case SWIG_LUA_INT:
       lua_pushstring(L,constants[i].name);
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 501		
       lua_pushnumber(L,(lua_Number)constants[i].lvalue);
+#else
+      lua_pushinteger(L,(lua_Integer)constants[i].lvalue);
+#endif
       lua_rawset(L,-3);
       break;
     case SWIG_LUA_FLOAT:
