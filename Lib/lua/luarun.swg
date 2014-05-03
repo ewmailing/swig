@@ -1027,8 +1027,9 @@ SWIGINTERN int  SWIG_Lua_class_tostring(lua_State *L)
 {
 /*  there should be 1 param passed in
   (1) userdata (not the metatable) */
+  swig_lua_userdata *userData;
   assert(lua_isuserdata(L,1));  /* just in case */
-  unsigned long userData = (unsigned long)lua_touserdata(L,1); /* get the userdata address for later */
+  userData = (swig_lua_userdata*)lua_touserdata(L,1); /* get the userdata address for later */
   lua_getmetatable(L,1);    /* get the meta table */
   assert(lua_istable(L,-1));  /* just in case */
 
@@ -1036,7 +1037,7 @@ SWIGINTERN int  SWIG_Lua_class_tostring(lua_State *L)
   const char *className = lua_tostring(L, -1);
 
   char output[256];
-  snprintf(output, 255, "<%s userdata: %lX>", className, userData);
+  snprintf(output, 255, "<%s userdata: %lX cptr: %lX>", className, (unsigned long)userData, (unsigned long)userData->ptr);
 
   lua_pushstring(L, (const char*)output);
   return 1;
@@ -1274,6 +1275,9 @@ SWIGINTERN void SWIG_Lua_class_register_static(lua_State *L, swig_lua_class *cls
   assert( lua_gettop(L) == begin );
 }
 
+/* Need forward declaration so we can reuse this in SWIG_Lua_class_register_instance because it is defined lower down. */
+SWIGRUNTIME int SWIG_Lua_equal(lua_State *L);
+
 /* Performs the instance (non-static) class registration process. Metatable for class is created
  * and added to the class registry.
  */
@@ -1343,6 +1347,8 @@ SWIGINTERN void  SWIG_Lua_class_register_instance(lua_State *L,swig_lua_class *c
   SWIG_Lua_add_function(L,"__gc",SWIG_Lua_class_destruct);
   /* add tostring method for better output */
   SWIG_Lua_add_function(L,"__tostring",SWIG_Lua_class_tostring);
+  /* add default == which will compare underyling native pointers */
+  SWIG_Lua_add_function(L,"__eq",SWIG_Lua_equal);
   /* add it */
   lua_rawset(L,-3);  /* metatable into registry */
   lua_pop(L,1);      /* tidy stack (remove registry) */
