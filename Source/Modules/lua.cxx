@@ -724,6 +724,16 @@ public:
     // Remember C name of the wrapping function
     Setattr(n, "wrap:name", wname);
 
+    /* Handle refassoc/refunassoc %feature */
+    String *feature_refassoc = Getattr(n, "feature:refassoc");
+    if(feature_refassoc) {
+        generateRefAssociation(n);
+    }
+    String *feature_refunassoc = Getattr(n, "feature:refunassoc");
+    if(feature_refunassoc) {
+        generateRefUnassociation(n);
+    }
+
     /* Emit the function call */
     String *actioncode = emit_action(n);
 
@@ -2164,6 +2174,195 @@ public:
 	   tab4, (has_classes) ? classes_tab_name : null_string, ",\n",
 	   tab4, (has_namespaces) ? namespaces_tab_name : null_string, "\n};\n", NIL);
     Delete(null_string);
+  }
+
+  /* -----------------------------------------------------------------------------
+   * generateRefAssociation()
+   *
+   * Create a memory reference association between objectA and objectB
+   * ----------------------------------------------------------------------------- */
+
+  void generateRefAssociation(Node *n) {
+    String *objectA = Getattr(n, "feature:refassoc:objectA");
+    String *objectB = Getattr(n, "feature:refassoc:objectB");
+    String *refRule = Getattr(n, "feature:refassoc:refRule");
+    int objectA_arg_index = 0;
+    int objectB_arg_index = 0;
+
+    /* Lua arg indices start at 1 */
+    int count = 1;
+    ParmList *plist = Getattr(n, "parms");
+    while (plist) {
+      String* param_name = Getattr(plist, "name");
+      if(0 == Cmp(objectA, param_name)) {
+        objectA_arg_index = count;
+      }
+      if(0 == Cmp(objectB, param_name)) {
+        objectB_arg_index = count;
+      }
+      count++;
+      plist = nextSibling(plist);
+    }
+
+    /* The way Lua functions are called, we have the args taking 1 to n-args. 
+     * Then the return result result will be placed on the stack at n+1 
+     * (which is where count is at the end of the above loop).
+     */
+    if(0 == Cmp(objectA, "return")) {
+      objectA_arg_index = count;
+    }
+    if(0 == Cmp(objectB, "return")) {
+      objectB_arg_index = count;
+    }
+    /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+    if(objectA_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+      return;
+    }
+    if(objectB_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+      return;
+    }
+
+    String* generatedLuaSetRefAssociation = NewString("\n\n");
+    if(0 == Cmp(refRule, ">")) {
+        /* I interpret > as: Make objectA hold a reference to objectB */
+        Printf(generatedLuaSetRefAssociation, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+        Printf(generatedLuaSetRefAssociation, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        
+    }
+    else if(0 == Cmp(refRule, "<")) {
+        /* I interpret > as: Make objectB hold a reference to objectA */
+        Printf(generatedLuaSetRefAssociation, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        Printf(generatedLuaSetRefAssociation, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+
+	}
+    Printf(generatedLuaSetRefAssociation, "  SWIG_Lua_AssociateReference(L);\n");
+    Printf(generatedLuaSetRefAssociation, "  lua_pop(L, 2);\n");
+    Printf(generatedLuaSetRefAssociation, "\n");
+
+    /* SWIG has an internal mechanism called wrap:postaction which seems little used.
+     * (One use in Python?)
+     * But it allows code to be injected right after the underlying native function call, 
+     * but before the SWIG wrapper cleans up and returns. This is perfect for our use.
+     * We use postaction, because in the return value case, this must be done after the function call
+     * since we won't have a value otherwise.
+     */
+
+    String* postaction = Getattr(n, "wrap:postaction");
+    if(postaction) {
+      Append(generatedLuaSetRefAssociation, postaction);
+    }
+    Setattr(n, "wrap:postaction", generatedLuaSetRefAssociation);	  
+    
+    Delete(generatedLuaSetRefAssociation);
+  }
+
+
+ /* -----------------------------------------------------------------------------
+   * generateRefUnassociation()
+   *
+   * Remove a memory reference association between objectA and objectB
+   * ----------------------------------------------------------------------------- */
+
+  void generateRefUnassociation(Node *n) {
+    String *objectA = Getattr(n, "feature:refunassoc:objectA");
+    String *objectB = Getattr(n, "feature:refunassoc:objectB");
+    String *refRule = Getattr(n, "feature:refunassoc:refRule");
+    int objectA_arg_index = 0;
+    int objectB_arg_index = 0;
+    bool is_return = false;
+
+    /* Lua arg indices start at 1 */
+    int count = 1;
+    ParmList *plist = Getattr(n, "parms");
+    while (plist) {
+      String* param_name = Getattr(plist, "name");
+      Printf(stderr, "param_name: %s\n", param_name);
+      if(0 == Cmp(objectA, param_name)) {
+        objectA_arg_index = count;
+      }
+      if(0 == Cmp(objectB, param_name)) {
+        objectB_arg_index = count;
+      }
+      count++;
+      plist = nextSibling(plist);
+    }
+
+    /* The way Lua functions are called, we have the args taking 1 to n-args. 
+     * Then the return result result will be placed on the stack at n+1 
+     * (which is where count is at the end of the above loop).
+     */
+    if(0 == Cmp(objectA, "return")) {
+      objectA_arg_index = count;
+      is_return = true;
+    }
+    if(0 == Cmp(objectB, "return")) {
+      objectB_arg_index = count;
+      is_return = true;
+    }
+    /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+    if(objectA_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+      return;
+    }
+    if(objectB_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+      return;
+    }
+
+    String* generatedLuaRemoveRefAssociation = NewString("\n");
+    if(0 == Cmp(refRule, ">")) {
+        /* I interpret > as: Make objectA hold a reference to objectB */
+        Printf(generatedLuaRemoveRefAssociation, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+        Printf(generatedLuaRemoveRefAssociation, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        
+    }
+    else if(0 == Cmp(refRule, "<")) {
+        /* I interpret > as: Make objectB hold a reference to objectA */
+        Printf(generatedLuaRemoveRefAssociation, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        Printf(generatedLuaRemoveRefAssociation, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+
+	}
+    Printf(generatedLuaRemoveRefAssociation, "  SWIG_Lua_UnassociateReference(L);\n");
+    Printf(generatedLuaRemoveRefAssociation, "  lua_pop(L, 2);\n");
+    Printf(generatedLuaRemoveRefAssociation, "\n");
+
+    /* SWIG has an internal mechanism called wrap:postaction and wrap:preaction which seems little used.
+     * (One use in Python?)
+     * postaction allows code to be injected right after the underlying native function call, 
+     * but before the SWIG wrapper cleans up and returns. 
+     * preaction allows code to be injected before the function call.
+     * Unless the user has specified the return value as one of the objects, we want to use preaction.
+     * This is because it is possible this is a function that frees objects, so we don't want to risk
+     * using dangling pointers.
+     */
+    //  Printf(stderr, "generatedLuaRemoveRefAssociation:\n%s\n", generatedLuaRemoveRefAssociation);
+
+    String* postaction = Getattr(n, "wrap:postaction");
+    if(postaction)
+    {
+  //    Printf(stderr, "postaction:\n%s\n", postaction);
+      Append(generatedLuaRemoveRefAssociation, postaction);
+    }
+    if(is_return) {
+      Setattr(n, "wrap:postaction", generatedLuaRemoveRefAssociation);
+    }
+    else {
+      Setattr(n, "wrap:preaction", generatedLuaRemoveRefAssociation);      
+    }
+    
+    Delete(generatedLuaRemoveRefAssociation);
   }
 
   /* -----------------------------------------------------------------------------

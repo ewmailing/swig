@@ -1643,10 +1643,10 @@ SWIGINTERN void SWIG_Lua_elua_class_register_instance(lua_State *L, swig_lua_cla
 
 
 
-/* For objectA and objectB, make objectB hold a reference to objectA
- * such that objectA cannot be collected until objectB is discarded.
- * Example: Tree: objectB is a child node of objectA. This will prevent the root (objectA) 
- * of the tree from being collected as long as objectB is in the system.
+/* For objectA and objectB, make objectA hold a reference to objectB
+ * such that objectB cannot be collected until objectA is discarded.
+ * Example: Tree: objectB is a child node of objectA. This will prevent the child (objectB) 
+ * from being collected as long as the root node is alive.
  * 2 params are expected to be passed in. Function returns with the 2 params still on the stack.
  */
 SWIGINTERN void SWIG_Lua_AssociateReference(lua_State *L)
@@ -1672,14 +1672,14 @@ SWIGINTERN void SWIG_Lua_AssociateReference(lua_State *L)
 	 This means that every Associate (add) must be balanced by an Unassociate (remove).
  */
 
-  lua_getmetatable(L,substack_start+2);
-  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectB */
+  lua_getmetatable(L,substack_start+1);
+  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
   assert(lua_istable(L,-1));
 
 
   array_length = lua_rawlen(L, -1);
-  lua_pushvalue(L, substack_start+1); /* push objectA on the stack */
-  lua_rawseti(L, -2, array_length+1); /* add objectA to the end of objectB's ref array */
+  lua_pushvalue(L, substack_start+2); /* push objectB on the stack */
+  lua_rawseti(L, -2, array_length+1); /* add objectB to the end of objectA's ref array */
 
   lua_pop(L, 2); /* pop the .refownerlist and metatable */
 
@@ -1698,13 +1698,13 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
   int deleted_index = 0;
   int substack_start = lua_gettop(L) - 2;
   int ref_list_table_index;
-  swig_lua_userdata* object_a_user_data;
+  swig_lua_userdata* object_b_user_data;
   swig_lua_userdata* object_current_user_data;
   lua_checkstack(L, 3);
   assert(lua_isuserdata(L, substack_start+1));  /* just in case */
   assert(lua_isuserdata(L, substack_start+2));  /* just in case */
   
-  object_a_user_data = (swig_lua_userdata*)lua_touserdata(L, substack_start+1);
+  object_b_user_data = (swig_lua_userdata*)lua_touserdata(L, substack_start+2);
 
 
   /*
@@ -1718,8 +1718,8 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
 	 This means that every Associate (add) must be balanced by an Unassociate (remove).
  */
 
-  lua_getmetatable(L,substack_start+2);
-  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectB */
+  lua_getmetatable(L,substack_start+1);
+  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
   assert(lua_istable(L,-1));
   ref_list_table_index = substack_start+4;
   array_length = lua_rawlen(L, -1);
@@ -1730,8 +1730,8 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
 	  lua_rawgeti(L, ref_list_table_index, i);
 	  assert(lua_isuserdata(L, -1));  /* just in case */
 	  object_current_user_data = (swig_lua_userdata*)lua_touserdata(L, -1);
-	  if( (object_current_user_data == object_a_user_data)
-		  || (object_current_user_data->ptr == object_a_user_data->ptr)
+	  if( (object_current_user_data == object_b_user_data)
+		  || (object_current_user_data->ptr == object_b_user_data->ptr)
 	  )
 	  {
 		  /* We'll just record the index position now. We'll delete the entry below. */
