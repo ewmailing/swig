@@ -26,6 +26,9 @@ typedef struct {
   bool swigCMemOwn;
   void *swigCObject;
   swig_type_info *info;
+  size_t refOwnerListMaxLength;
+  size_t refOwnerListCurrentLength;
+  JSObjectRef* refOwnerList;
 } SwigPrivData;
 
 JSValueRef _wrap_SwigObject_disown(JSContextRef context, JSObjectRef function, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef* exception)
@@ -155,6 +158,9 @@ JSObjectRef SWIG_JSC_NewPointerObj(JSContextRef context, void *ptr, swig_type_in
   cdata->swigCObject = ptr;
   cdata->swigCMemOwn = (flags & SWIG_POINTER_OWN) ? 1 : 0;
   cdata->info = info;
+  cdata->refOwnerListMaxLength = 0;
+  cdata->refOwnerListCurrentLength = 0;
+  cdata->refOwnerList = NULL;
 
   JSObjectSetPrivate(result, cdata);
 
@@ -296,3 +302,137 @@ JSValueRef SWIGJSC_AppendOutput(JSContextRef context, JSValueRef value, JSValueR
   length = SWIGJSC_ArrayLength(context, arr);
   JSObjectSetPropertyAtIndex(context, arr, length, obj, 0);
 }
+
+
+
+
+/* For objectA and objectB, make objectA hold a reference to objectB
+ * such that objectB cannot be collected until objectA is discarded.
+ * Example: Tree: objectB is a child node of objectA. This will prevent the child (objectB) 
+ * from being collected as long as the root node is alive.
+ * 2 params are expected to be passed in. Function returns with the 2 params still on the stack.
+ */
+SWIGRUNTIME void SWIGJSC_AssociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
+{
+  SwigPrivData *cdata;
+  /*
+    There are two tricky implementation details that this implementation tries to handle.
+    1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+    2. A user may want to associate a reference multiple times.
+    For 1, we need to compare against the underlying C-ptr instead of the user data when 
+    unassociating (removing) because it may be out of the user's control whether
+    they have the same userdata wrapper since this is a SWIG implementation detail.
+    For 2, the easiest thing to do is make this a list instead of an associative array.
+    This means that every Associate (add) must be balanced by an Unassociate (remove).
+   */
+
+  cdata = (SwigPrivData*) JSObjectGetPrivate(objectA);
+
+  /* create the reference list if it doesn't exist */
+  if(NULL == cdata->refOwnerList) {
+    /* Use a standard vector resizing approach of doubling every time */
+    cdata->refOwnerListMaxLength = 2;
+    cdata->refOwnerListCurrentLength = 0;
+    cdata->refOwnerList = (JSObjectRef*)malloc(cdata->refOwnerListMaxLength * sizeof(JSObjectRef));
+  }
+
+  /* make sure the array is large enough */
+  if(cdata->refOwnerListCurrentLength == cdata->refOwnerListMaxLength) {
+    JSObjectRef* newarray;
+    /* Use a standard vector resizing approach of doubling every time */
+    newarray = (JSObjectRef*)realloc(cdata->refOwnerList, 2 * cdata->refOwnerListMaxLength * sizeof(JSObjectRef));
+    if(NULL == newarray) {
+      JSValueRef jsexception = NULL;
+      SWIG_Javascript_Raise(context, &jsexception, "realloc for refOwnerList failed");
+      return;
+    }
+    free(cdata->refOwnerList);
+    cdata->refOwnerList = newarray;
+    /* update the max size now that we have successfully resized */
+    cdata->refOwnerListMaxLength = cdata->refOwnerListMaxLength * 2;    
+  }
+
+  /* add objectB to objectA's reference list */
+  cdata->refOwnerList[cdata->refOwnerListCurrentLength] = objectB;
+  cdata->refOwnerListCurrentLength = cdata->refOwnerListCurrentLength + 1;
+
+  /* increment the reference count on objectB to let the VM know we are retaining it */
+  JSValueProtect(context, objectB);
+}
+
+SWIGRUNTIME void SWIGJSC_UnassociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
+{
+  JSObjectRef obj;
+  SwigPrivData *cdata_A;
+  SwigPrivData *cdata_B;
+
+  long i;
+  long deleted_index = 0;
+
+  /*
+	 There are two tricky implementation details that this implementation tries to handle.
+	 1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+	 2. A user may want to associate a reference multiple times.
+	 For 1, we need to compare against the underlying C-ptr instead of the user data when 
+	 unassociating (removing) because it may be out of the user's control whether
+	 they have the same userdata wrapper since this is a SWIG implementation detail.
+	 For 2, the easiest thing to do is make this a list instead of an associative array.
+	 This means that every Associate (add) must be balanced by an Unassociate (remove).
+ */
+  cdata_A = (SwigPrivData*) JSObjectGetPrivate(objectA);
+  cdata_B = (SwigPrivData*) JSObjectGetPrivate(objectB);
+
+  /* This should be an assertion failure if the reference list doesn't exist */
+  if(NULL == cdata_A->refOwnerList) {
+    return;
+  }
+  /* This should be an assertion failure if the reference list is empty */
+  if(0 == cdata_A->refOwnerListCurrentLength) {
+    return;
+  }
+
+  /* go backwards to remove at the end of the list */
+  for(i=cdata_A->refOwnerListCurrentLength; i>=0; i--) {
+    SwigPrivData *cdata_current;
+    JSObjectRef current_object = cdata_A->refOwnerList[i];
+	  if( (current_object == objectB)
+		  || (cdata_current->swigCObject == cdata_B->swigCObject)
+	  )
+	  {
+		  /* We'll just record the index position now. We'll delete the entry below. */
+		  deleted_index = i;
+
+      /* decrement the retain count since we have the object handy */
+      /* I'm a little worried about the case where current_object != objectB
+         but the underlying pointers are equal. 
+         The question arises, do I delete current_object or objectB?
+         In many cases, it won't matter, but if the userdata wrappers have different 
+         memory ownership rules, it could matter.
+         But this is really an argument to fix the SWIG implementation to use 1-to-1 mappings
+         which prevents these ambiguities from happening.
+       */
+      JSValueUnprotect(context, current_object);
+      
+		  break;
+	  }
+  }
+
+  /* Should it be an error if you try to remove an association that doesn't exist?
+	 If so, deleted_index == 0 at this point. You can use that to check.
+  */
+
+  /* We don't want to leave holes in the array, so shift all the entries back overwriting the deleted slot. */
+  if(deleted_index != -1)
+  {
+	  for(i=deleted_index; i<cdata_A->refOwnerListCurrentLength; i++)
+	  {
+      cdata_A->refOwnerList[i] = cdata_A->refOwnerList[i+1];
+	  }
+	  /* now delete the last spot */
+    cdata_A->refOwnerList[cdata_A->refOwnerListCurrentLength] = NULL;
+    cdata_A->refOwnerListCurrentLength = cdata_A->refOwnerListCurrentLength - 1;
+  }
+
+}
+
+

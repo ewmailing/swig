@@ -108,6 +108,17 @@ JSObjectRef $jswrapper(JSContextRef context, JSObjectRef thisObject, size_t argc
 void $jswrapper(JSObjectRef thisObject)
 {
   SwigPrivData* t = (SwigPrivData*) JSObjectGetPrivate(thisObject);
+#if 0
+  /* If there was a reference association in use, then we need to traverse the list of referneces and release them. */
+  /* Drat: This won't work because JSCore doesn't give me a context nor let me call context functions in finalize */
+  if(NULL == t->refOwnerList) {
+	int i;
+	for(i=0; i<t->refOwnerListCurrentLength; i++) {
+	  JSValueUnprotect(context, t->refOwnerList[i]);
+	}
+	free(t->refOwnerList);
+  }
+#endif
   if(t && t->swigCMemOwn) free (($jstype)t->swigCObject);
   if(t) free(t);
 }
