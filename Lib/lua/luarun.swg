@@ -1750,7 +1750,7 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
   /* We don't want to leave holes in the Lua array, so shift all the entries back overwriting the deleted slot. */
   if(deleted_index != 0)
   {
-	  for(i=deleted_index; i<array_length; i--)
+	  for(i=deleted_index; i<array_length; i++)
 	  {
 		  lua_rawgeti(L, ref_list_table_index, i+1); /* push the object at i+1 onto the stack */
 		  lua_rawseti(L, ref_list_table_index, i); /* move the object into the current (i) slot */
