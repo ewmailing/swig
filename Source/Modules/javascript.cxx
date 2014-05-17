@@ -1896,7 +1896,7 @@ void JSCEmitter::generateRefAssociation(Node *n, String *inoutGeneratedString) {
   Printf(inoutGeneratedString, "\n\n");
   if(0 == Cmp(refRule, ">")) {
       /* I interpret > as: Make objectA hold a reference to objectB */
-      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReference(context, ");
+      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReferenceWithJSValueRefs(context, ");
       if(0 == Cmp(objectA, "return")) {
         Printf(inoutGeneratedString, "jsresult, ");
       } else {
@@ -1910,7 +1910,7 @@ void JSCEmitter::generateRefAssociation(Node *n, String *inoutGeneratedString) {
   }
   else if(0 == Cmp(refRule, "<")) {
       /* I interpret > as: Make objectB hold a reference to objectA */
-      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReference(context, ");
+      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReferenceWithJSValueRefs(context, ");
       if(0 == Cmp(objectB, "return")) {
         Printf(inoutGeneratedString, "jsresult, ");
       } else {
@@ -1977,7 +1977,7 @@ void JSCEmitter::generateRefUnassociation(Node *n, String* inoutGeneratedString,
 
   if(0 == Cmp(refRule, ">")) {
       /* I interpret > as: Make objectA hold a reference to objectB */
-      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReference(context, ");
+      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReferenceWithJSValueRefs(context, ");
       if(0 == Cmp(objectA, "return")) {
         Printf(inoutGeneratedString, "jsresult, ");
       } else {
@@ -1991,7 +1991,7 @@ void JSCEmitter::generateRefUnassociation(Node *n, String* inoutGeneratedString,
   }
   else if(0 == Cmp(refRule, "<")) {
       /* I interpret > as: Make objectB hold a reference to objectA */
-      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReference(context, ");
+      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReferenceWithJSValueRefs(context, ");
       if(0 == Cmp(objectB, "return")) {
         Printf(inoutGeneratedString, "jsresult, ");
       } else {

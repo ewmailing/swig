@@ -426,4 +426,22 @@ SWIGRUNTIME void SWIGJSC_UnassociateReference(JSContextRef context, JSObjectRef 
   JSStringRelease(js_script_string);  
 }
 
+/* This is a convenience wrapper function to convert types because the SWIG implementation mostly uses JSValueRef
+   and not JSObjectRef.
+   The assumption is that all JSValueRefs passed to this function MUST be convertable to JSObjectRefs.
+*/
+SWIGRUNTIME void SWIGJSC_AssociateReferenceWithJSValueRefs(JSContextRef context, JSValueRef objectA, JSValueRef objectB) {
+  JSObjectRef objectAref;
+  JSObjectRef objectBref;
+  objectAref = JSValueToObject(context, objectA, NULL);
+  objectBref = JSValueToObject(context, objectB, NULL);
+  SWIGJSC_AssociateReference(context, objectAref, objectBref);
+}
+SWIGRUNTIME void SWIGJSC_UnassociateReferenceWithJSValueRefs(JSContextRef context, JSValueRef objectA, JSValueRef objectB) {
+  JSObjectRef objectAref;
+  JSObjectRef objectBref;
+  objectAref = JSValueToObject(context, objectA, NULL);
+  objectBref = JSValueToObject(context, objectB, NULL);
+  SWIGJSC_UnassociateReference(context, objectAref, objectBref);
+}
 
