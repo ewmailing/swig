@@ -2227,8 +2227,8 @@ public:
     String *objectA = Getattr(n, "feature:refassoc:objectA");
     String *objectB = Getattr(n, "feature:refassoc:objectB");
     String *refRule = Getattr(n, "feature:refassoc:refRule");
-    int objectA_arg_index = 0;
-    int objectB_arg_index = 0;
+    int objectA_arg_index = -1;
+    int objectB_arg_index = -1;
 
     /* Lua arg indices start at 1 */
     int count = 1;
@@ -2299,8 +2299,8 @@ public:
     String *objectA = Getattr(n, "feature:refunassoc:objectA");
     String *objectB = Getattr(n, "feature:refunassoc:objectB");
     String *refRule = Getattr(n, "feature:refunassoc:refRule");
-    int objectA_arg_index = 0;
-    int objectB_arg_index = 0;
+    int objectA_arg_index = -1;
+    int objectB_arg_index = -1;
     bool is_return = false;
 
     /* Lua arg indices start at 1 */
@@ -2341,7 +2341,6 @@ public:
       return;
     }
 
-    String* generatedLuaRemoveRefAssociation = NewString("\n");
     if(0 == Cmp(refRule, ">")) {
         /* I interpret > as: Make objectA hold a reference to objectB */
         Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
