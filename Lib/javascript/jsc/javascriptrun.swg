@@ -26,9 +26,6 @@ typedef struct {
   bool swigCMemOwn;
   void *swigCObject;
   swig_type_info *info;
-  size_t refOwnerListMaxLength;
-  size_t refOwnerListCurrentLength;
-  JSObjectRef* refOwnerList;
 } SwigPrivData;
 
 JSValueRef _wrap_SwigObject_disown(JSContextRef context, JSObjectRef function, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef* exception)
@@ -158,9 +155,6 @@ JSObjectRef SWIG_JSC_NewPointerObj(JSContextRef context, void *ptr, swig_type_in
   cdata->swigCObject = ptr;
   cdata->swigCMemOwn = (flags & SWIG_POINTER_OWN) ? 1 : 0;
   cdata->info = info;
-  cdata->refOwnerListMaxLength = 0;
-  cdata->refOwnerListCurrentLength = 0;
-  cdata->refOwnerList = NULL;
 
   JSObjectSetPrivate(result, cdata);
 
@@ -314,7 +308,6 @@ JSValueRef SWIGJSC_AppendOutput(JSContextRef context, JSValueRef value, JSValueR
  */
 SWIGRUNTIME void SWIGJSC_AssociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
 {
-  SwigPrivData *cdata;
   /*
     There are two tricky implementation details that this implementation tries to handle.
     1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
@@ -326,49 +319,48 @@ SWIGRUNTIME void SWIGJSC_AssociateReference(JSContextRef context, JSObjectRef ob
     This means that every Associate (add) must be balanced by an Unassociate (remove).
    */
 
-  cdata = (SwigPrivData*) JSObjectGetPrivate(objectA);
+ /* I tried extremely hard to implement this using only the C-API and keep the details hidden/private
+    from the user, but I don't think it is possible with JavaScriptCore.
+    The fundamental problem is that I don't see any way to make one object hold a reference to another
+    from the C-API. The closest thing is JSValueProtect (which you will find my attempt in the commit history).
+    But the problem is that JSCore disallows you from calling JSValueUnprotect during the finalizer.
+    So it is impossible to break the reference and allow referenced objects to go free when the holding 
+    object gets collected.
+    So this implementation uses JavaScript directly to create a new hidden property (array)
+    on the object which will store the references. The normal GC system will handle this correctly.
+    The implementation is tricky because JSCore doesn't make it that easy to do what we need.
+    Ultimately, we need to call a function that passes objectA and objectB which will create the reference
+    array and add objectB to the list.
+    But JSCore doesn't just let us pass objectA and objectB to JSEvaluateScript.
+    So instead, we need to create a script that returns a function object which contains the implementation
+    of what we need to do.
+    Then we use that returned function object and invoke it with JSObjectCallAsFunction,
+    because this function will allow us to pass our 2 JSObjectRefs for objectA and objectB.
+    This works, but does create a visible (array) property: _swigRefAssocList on objectA.
+  */
+  JSObjectRef js_function_object;
+  JSValueRef js_result;
+  JSStringRef js_script_string;
+  const JSValueRef arguments[2] = {objectA, objectB};
+  js_script_string = JSStringCreateWithUTF8CString(
+"(function () {\n"
+  "return function (objectA, objectB) {\n"
+    "if(typeof objectA._swigRefAssocList === 'undefined') {\n"
+      "objectA._swigRefAssocList = [];\n"
+    "}\n"
+    "objectA._swigRefAssocList.push(objectB);\n"
+  "}\n"
+"}());\n"
+    );
+    js_result = JSEvaluateScript(context, js_script_string, NULL, NULL, 0, NULL);
+    js_function_object = JSValueToObject(context, js_result, NULL);
 
-  /* create the reference list if it doesn't exist */
-  if(NULL == cdata->refOwnerList) {
-    /* Use a standard vector resizing approach of doubling every time */
-    cdata->refOwnerListMaxLength = 2;
-    cdata->refOwnerListCurrentLength = 0;
-    cdata->refOwnerList = (JSObjectRef*)malloc(cdata->refOwnerListMaxLength * sizeof(JSObjectRef));
-  }
-
-  /* make sure the array is large enough */
-  if(cdata->refOwnerListCurrentLength == cdata->refOwnerListMaxLength) {
-    JSObjectRef* newarray;
-    /* Use a standard vector resizing approach of doubling every time */
-    newarray = (JSObjectRef*)realloc(cdata->refOwnerList, 2 * cdata->refOwnerListMaxLength * sizeof(JSObjectRef));
-    if(NULL == newarray) {
-      JSValueRef jsexception = NULL;
-      SWIG_Javascript_Raise(context, &jsexception, "realloc for refOwnerList failed");
-      return;
-    }
-    free(cdata->refOwnerList);
-    cdata->refOwnerList = newarray;
-    /* update the max size now that we have successfully resized */
-    cdata->refOwnerListMaxLength = cdata->refOwnerListMaxLength * 2;    
-  }
-
-  /* add objectB to objectA's reference list */
-  cdata->refOwnerList[cdata->refOwnerListCurrentLength] = objectB;
-  cdata->refOwnerListCurrentLength = cdata->refOwnerListCurrentLength + 1;
-
-  /* increment the reference count on objectB to let the VM know we are retaining it */
-  JSValueProtect(context, objectB);
+    JSObjectCallAsFunction(context, js_function_object, NULL, 2, arguments, NULL);
+    JSStringRelease(js_script_string);
 }
 
 SWIGRUNTIME void SWIGJSC_UnassociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
 {
-  JSObjectRef obj;
-  SwigPrivData *cdata_A;
-  SwigPrivData *cdata_B;
-
-  long i;
-  long deleted_index = 0;
-
   /*
 	 There are two tricky implementation details that this implementation tries to handle.
 	 1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
@@ -379,60 +371,59 @@ SWIGRUNTIME void SWIGJSC_UnassociateReference(JSContextRef context, JSObjectRef 
 	 For 2, the easiest thing to do is make this a list instead of an associative array.
 	 This means that every Associate (add) must be balanced by an Unassociate (remove).
  */
-  cdata_A = (SwigPrivData*) JSObjectGetPrivate(objectA);
-  cdata_B = (SwigPrivData*) JSObjectGetPrivate(objectB);
 
-  /* This should be an assertion failure if the reference list doesn't exist */
-  if(NULL == cdata_A->refOwnerList) {
-    return;
-  }
-  /* This should be an assertion failure if the reference list is empty */
-  if(0 == cdata_A->refOwnerListCurrentLength) {
-    return;
-  }
-
-  /* go backwards to remove at the end of the list */
-  for(i=cdata_A->refOwnerListCurrentLength; i>=0; i--) {
-    SwigPrivData *cdata_current;
-    JSObjectRef current_object = cdata_A->refOwnerList[i];
-	  if( (current_object == objectB)
-		  || (cdata_current->swigCObject == cdata_B->swigCObject)
-	  )
-	  {
-		  /* We'll just record the index position now. We'll delete the entry below. */
-		  deleted_index = i;
-
-      /* decrement the retain count since we have the object handy */
-      /* I'm a little worried about the case where current_object != objectB
-         but the underlying pointers are equal. 
-         The question arises, do I delete current_object or objectB?
-         In many cases, it won't matter, but if the userdata wrappers have different 
-         memory ownership rules, it could matter.
-         But this is really an argument to fix the SWIG implementation to use 1-to-1 mappings
-         which prevents these ambiguities from happening.
-       */
-      JSValueUnprotect(context, current_object);
-      
-		  break;
-	  }
-  }
-
-  /* Should it be an error if you try to remove an association that doesn't exist?
-	 If so, deleted_index == 0 at this point. You can use that to check.
+ /* I tried extremely hard to implement this using only the C-API and keep the details hidden/private
+    from the user, but I don't think it is possible with JavaScriptCore.
+    The fundamental problem is that I don't see any way to make one object hold a reference to another
+    from the C-API. The closest thing is JSValueProtect (which you will find my attempt in the commit history).
+    But the problem is that JSCore disallows you from calling JSValueUnprotect during the finalizer.
+    So it is impossible to break the reference and allow referenced objects to go free when the holding 
+    object gets collected.
+    So this implementation uses JavaScript directly to create a new hidden property (array)
+    on the object which will store the references. The normal GC system will handle this correctly.
+    The implementation is tricky because JSCore doesn't make it that easy to do what we need.
+    Ultimately, we need to call a function that passes objectA and objectB which will create the reference
+    array and add objectB to the list.
+    But JSCore doesn't just let us pass objectA and objectB to JSEvaluateScript.
+    So instead, we need to create a script that returns a function object which contains the implementation
+    of what we need to do.
+    Then we use that returned function object and invoke it with JSObjectCallAsFunction,
+    because this function will allow us to pass our 2 JSObjectRefs for objectA and objectB.
+    This works, but does create a visible (array) property: _swigRefAssocList on objectA.
   */
+  /* Note: This implementation depends on 'equals' (_wrap_SwigObject_equals) in _SwigObject_functions.
+     This relies on C-ptr comparisons which 'equals' does.
+   */
+  JSObjectRef js_function_object;
+  JSValueRef js_result;
+  JSStringRef js_script_string;
+  const JSValueRef arguments[2] = {objectA, objectB};
+  js_script_string = JSStringCreateWithUTF8CString(
+"(function () {\n"
+  "return function (objectA, objectB) {\n"
+    "var i;\n"
+    "var delete_index = -1;\n"
+    "if(typeof objectA._swigRefAssocList === 'undefined') {\n"
+      "return;\n"
+    "}\n"
+    "for(i=objectA._swigRefAssocList.length-1; i>=0; i--) {\n"
+      "if(objectA.equals(objectB)) {\n"
+        "delete_index = i;\n"
+        "break;\n"
+      "}\n"
+    "}\n"
+    "if(delete_index > -1) {\n"
+      "objectA._swigRefAssocList.splice(delete_index, 1);\n"
+    "}\n"
+  "}\n"
+"}());\n"
+  );
 
-  /* We don't want to leave holes in the array, so shift all the entries back overwriting the deleted slot. */
-  if(deleted_index != -1)
-  {
-	  for(i=deleted_index; i<cdata_A->refOwnerListCurrentLength; i++)
-	  {
-      cdata_A->refOwnerList[i] = cdata_A->refOwnerList[i+1];
-	  }
-	  /* now delete the last spot */
-    cdata_A->refOwnerList[cdata_A->refOwnerListCurrentLength] = NULL;
-    cdata_A->refOwnerListCurrentLength = cdata_A->refOwnerListCurrentLength - 1;
-  }
+  js_result = JSEvaluateScript(context, js_script_string, NULL, NULL, 0, NULL);
+  js_function_object = JSValueToObject(context, js_result, NULL);
 
+  JSObjectCallAsFunction(context, js_function_object, NULL, 2, arguments, NULL);
+  JSStringRelease(js_script_string);  
 }
 
 
