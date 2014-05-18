@@ -155,26 +155,43 @@ use %include <std_except.i> instead
 */
 
 // number as number+error
-%typemap(throws) int,unsigned int,signed int,
-				long,unsigned long,signed long,
-				short,unsigned short,signed short,
-				float,double,
-				long long,unsigned long long,
-				unsigned char, signed char,
-                int&,unsigned int&,signed int&,
-				long&,unsigned long&,signed long&,
-				short&,unsigned short&,signed short&,
-				float&,double&,
-				long long&,unsigned long long&,
-				unsigned char&, signed char&
+%typemap(throws) float,double,
+				float&,double&
 %{lua_pushnumber(L,(lua_Number)$1);SWIG_fail; %}
+
+/* Lua 5.2 introduced unsigned APIs so we should use them when available. */
+%typemap(throws) unsigned int,
+				unsigned long,
+				unsigned short,
+				unsigned long long,
+				unsigned char,
+                unsigned int&,
+				unsigned long&,
+				unsigned short&,
+				unsigned long long&,
+				unsigned char&
+%{lua_pushunsigned(L,(lua_Unsigned)$1);SWIG_fail; %}
+
+/* Lua 5.1 introduced integer APIs so we should use them when available. */
+%typemap(throws) int,signed int,
+				long,signed long,
+				short,signed short,
+				long long,
+				signed char,
+                int&,signed int&,
+				long&,signed long&,
+				short&,signed short&,
+				long long&,
+				signed char&
+%{lua_pushinteger(L,(lua_Integer)$1);SWIG_fail; %}
+
 
 %typemap(throws) bool,bool& 
 %{lua_pushboolean(L,(int)($1==true));SWIG_fail; %}
 
 // enum as number+error
 %typemap(throws) enum SWIGTYPE
-%{lua_pushnumber(L,(lua_Number)(int)$1);SWIG_fail; %}
+%{lua_pushinteger(L,(lua_Integer)$1);SWIG_fail; %}
 
 // strings are just sent as errors
 %typemap(throws) char *, const char *

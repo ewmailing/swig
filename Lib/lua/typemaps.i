@@ -65,17 +65,38 @@ or provide a %apply statement
    $1 = &temp; %}
 %enddef
 
-// now the code
-SWIG_NUMBER_TYPEMAP(unsigned char); SWIG_NUMBER_TYPEMAP(signed char);
+%define SWIG_INTEGER_TYPEMAP(TYPE)
+%typemap(in,checkfn="lua_isinteger")	TYPE *INPUT($*ltype temp), TYPE &INPUT($*ltype temp)
+%{ temp = ($*ltype)lua_tointeger(L,$input);
+   $1 = &temp; %}
+%typemap(in, numinputs=0) TYPE *OUTPUT ($*ltype temp)
+%{ $1 = &temp; %}
+%typemap(argout) TYPE *OUTPUT
+%{  lua_pushinteger(L, (lua_Integer) *$1); SWIG_arg++;%}
+%typemap(in) TYPE *INOUT = TYPE *INPUT;
+%typemap(argout) TYPE *INOUT = TYPE *OUTPUT;
+%typemap(in) TYPE &OUTPUT = TYPE *OUTPUT;
+%typemap(argout) TYPE &OUTPUT = TYPE *OUTPUT;
+%typemap(in) TYPE &INOUT = TYPE *INPUT;
+%typemap(argout) TYPE &INOUT = TYPE *OUTPUT;
+// const version (the $*ltype is the basic number without ptr or const's)
+%typemap(in,checkfn="lua_isinteger")	const TYPE *INPUT($*ltype temp)
+%{ temp = ($*ltype)lua_tointeger(L,$input);
+   $1 = &temp; %}
+%enddef
 
-SWIG_NUMBER_TYPEMAP(short); SWIG_NUMBER_TYPEMAP(unsigned short); SWIG_NUMBER_TYPEMAP(signed short);
-SWIG_NUMBER_TYPEMAP(int); SWIG_NUMBER_TYPEMAP(unsigned int); SWIG_NUMBER_TYPEMAP(signed int);
-SWIG_NUMBER_TYPEMAP(long); SWIG_NUMBER_TYPEMAP(unsigned long); SWIG_NUMBER_TYPEMAP(signed long);
+
+// now the code
+SWIG_INTEGER_TYPEMAP(unsigned char); SWIG_INTEGER_TYPEMAP(signed char);
+
+SWIG_INTEGER_TYPEMAP(short); SWIG_INTEGER_TYPEMAP(unsigned short); SWIG_INTEGER_TYPEMAP(signed short);
+SWIG_INTEGER_TYPEMAP(int); SWIG_INTEGER_TYPEMAP(unsigned int); SWIG_INTEGER_TYPEMAP(signed int);
+SWIG_INTEGER_TYPEMAP(long); SWIG_INTEGER_TYPEMAP(unsigned long); SWIG_INTEGER_TYPEMAP(signed long);
 SWIG_NUMBER_TYPEMAP(float);
 SWIG_NUMBER_TYPEMAP(double);
-SWIG_NUMBER_TYPEMAP(enum SWIGTYPE);
+SWIG_INTEGER_TYPEMAP(enum SWIGTYPE);
 // also for long longs's
-SWIG_NUMBER_TYPEMAP(long long); SWIG_NUMBER_TYPEMAP(unsigned long long); SWIG_NUMBER_TYPEMAP(signed long long);
+SWIG_INTEGER_TYPEMAP(long long); SWIG_INTEGER_TYPEMAP(unsigned long long); SWIG_INTEGER_TYPEMAP(signed long long);
 
 // note we dont do char, as a char* is probably a string not a ptr to a single char
 
