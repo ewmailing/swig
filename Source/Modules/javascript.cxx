@@ -197,6 +197,11 @@ public:
   virtual int emitWrapperFunction(Node *n);
 
   /**
+   * Invoked by JAVASCRIPT::nativeWrapper
+   */
+  virtual int emitNativeWrapper(Node *n);
+
+  /**
    * Invoked from constantWrapper after call to Language::constantWrapper.
    **/
   virtual int emitConstant(Node *n);
@@ -310,6 +315,7 @@ public:
   virtual int classHandler(Node *n);
   virtual int functionWrapper(Node *n);
   virtual int constantWrapper(Node *n);
+  virtual int nativeWrapper(Node *n);
   virtual void main(int argc, char *argv[]);
   virtual int top(Node *n);
 
@@ -437,6 +443,17 @@ int JAVASCRIPT::constantWrapper(Node *n) {
   // which could be fixed with a cleaner approach
   emitter->emitConstant(n);
 
+  return SWIG_OK;
+}
+
+/* ---------------------------------------------------------------------
+ * nativeWrapper()
+ *
+ * Function handler for generating wrappers for the %native directive 
+ * --------------------------------------------------------------------- */
+
+int JAVASCRIPT::nativeWrapper(Node *n) {
+  emitter->emitNativeWrapper(n);
   return SWIG_OK;
 }
 
@@ -765,6 +782,11 @@ int JSEmitter::emitWrapperFunction(Node *n) {
   }
 
   return ret;
+}
+
+int JSEmitter::emitNativeWrapper(Node*) {
+  /* Expecting subclasses to implement */
+  return SWIG_OK;
 }
 
 int JSEmitter::enterClass(Node *n) {
@@ -1455,6 +1477,7 @@ protected:
   virtual void marshalInputArgs(Node *n, ParmList *parms, Wrapper *wrapper, MarshallingMode mode, bool is_member, bool is_static);
   virtual Hash *createNamespaceEntry(const char *name, const char *parent);
   virtual int emitNamespaces();
+  virtual int emitNativeWrapper(Node *n);
 
 private:
 
@@ -1801,6 +1824,20 @@ int JSCEmitter::emitNamespaces() {
 
   return SWIG_OK;
 }
+
+int JSCEmitter::emitNativeWrapper(Node *n) {
+  String *symname = Getattr(n, "sym:name");
+  String *wrapname = Getattr(n, "wrap:name");
+
+  Template t_function = getTemplate("jsc_function_declaration");
+
+  t_function.replace("$jsname", symname)
+    .replace("$jswrapper", wrapname);
+
+  t_function.pretty_print(Getattr(current_namespace, "functions"));
+  return SWIG_OK;
+}
+
 
 JSEmitter *swig_javascript_create_JSCEmitter() {
   return new JSCEmitter();
