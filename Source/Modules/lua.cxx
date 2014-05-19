@@ -724,6 +724,39 @@ public:
     // Remember C name of the wrapping function
     Setattr(n, "wrap:name", wname);
 
+    /* Handle refassoc/refunassoc %feature */
+    String *refUnassociationGeneratedString = NewString("");
+    bool refUnassocIsReturn = false;
+    String *feature_refunassoc = Getattr(n, "feature:refunassoc");
+    if(feature_refunassoc) {
+        generateRefUnassociation(n, refUnassociationGeneratedString, refUnassocIsReturn);
+        /* SWIG has an internal mechanism called wrap:postaction and wrap:preaction which seems little used.
+         * (One use in Python?)
+         * postaction allows code to be injected right after the underlying native function call, 
+         * but before the SWIG wrapper cleans up and returns. 
+         * preaction allows code to be injected before the function call.
+         * postaction is almost, but not quite perfect for us. 
+         * The piece that puts the return value into a userdata comes after postaction which is a vital
+         * part that we need, particularly when the return value is one of the objects.
+         * For the Unassociation case, 
+         * unless the user has specified the return value as one of the objects, we want to use preaction.
+         * This is because it is possible this is a function that frees objects, so we don't want to risk
+         * using dangling pointers.
+         */
+        if(refUnassocIsReturn) {
+          /* Defer until after the userdata is created */
+        }
+        else {
+          String* preaction = Getattr(n, "wrap:preaction");
+          if(preaction) {
+            Append(refUnassociationGeneratedString, preaction);
+          }
+          Setattr(n, "wrap:preaction", refUnassociationGeneratedString);      
+        }
+    }
+
+    
+
     /* Emit the function call */
     String *actioncode = emit_action(n);
 
@@ -767,6 +800,24 @@ public:
 	Printf(f->code, "%s\n", tm);
       }
     }
+
+    if(feature_refunassoc) {
+        /* Handle the deferred case */
+        if(refUnassocIsReturn) {
+	      Printf(f->code, "%s", refUnassociationGeneratedString);
+        }
+    }
+    Delete(refUnassociationGeneratedString);
+
+    String *feature_refassoc = Getattr(n, "feature:refassoc");
+    if(feature_refassoc) {
+      String *refAssociationGeneratedString = NewString("");
+      generateRefAssociation(n, refAssociationGeneratedString);
+      Printf(f->code, "%s", refAssociationGeneratedString);
+      Delete(refAssociationGeneratedString);
+    }
+
+
 
     /* See if there is any return cleanup code */
     if ((tm = Swig_typemap_lookup("ret", n, Swig_cresult_name(), 0))) {
@@ -2164,6 +2215,153 @@ public:
 	   tab4, (has_classes) ? classes_tab_name : null_string, ",\n",
 	   tab4, (has_namespaces) ? namespaces_tab_name : null_string, "\n};\n", NIL);
     Delete(null_string);
+  }
+
+  /* -----------------------------------------------------------------------------
+   * generateRefAssociation()
+   *
+   * Create a memory reference association between objectA and objectB
+   * ----------------------------------------------------------------------------- */
+
+  void generateRefAssociation(Node *n, String *inoutGeneratedString) {
+    String *objectA = Getattr(n, "feature:refassoc:objectA");
+    String *objectB = Getattr(n, "feature:refassoc:objectB");
+    String *refRule = Getattr(n, "feature:refassoc:refRule");
+    int objectA_arg_index = -1;
+    int objectB_arg_index = -1;
+
+    /* Lua arg indices start at 1 */
+    int count = 1;
+    ParmList *plist = Getattr(n, "parms");
+    while (plist) {
+      String* param_name = Getattr(plist, "name");
+      if(0 == Cmp(objectA, param_name)) {
+        objectA_arg_index = count;
+      }
+      if(0 == Cmp(objectB, param_name)) {
+        objectB_arg_index = count;
+      }
+      count++;
+      plist = nextSibling(plist);
+    }
+
+    /* The way Lua functions are called, we have the args taking 1 to n-args. 
+     * Then the return result result will be placed on the stack at n+1 
+     * (which is where count is at the end of the above loop).
+     */
+    if(0 == Cmp(objectA, "return")) {
+      objectA_arg_index = count;
+    }
+    if(0 == Cmp(objectB, "return")) {
+      objectB_arg_index = count;
+    }
+    /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+    if(objectA_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+      return;
+    }
+    if(objectB_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+      return;
+    }
+
+    Printf(inoutGeneratedString, "\n\n");
+    if(0 == Cmp(refRule, ">")) {
+        /* I interpret > as: Make objectA hold a reference to objectB */
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        
+    }
+    else if(0 == Cmp(refRule, "<")) {
+        /* I interpret > as: Make objectB hold a reference to objectA */
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+
+	}
+    Printf(inoutGeneratedString, "  SWIG_Lua_AssociateReference(L);\n");
+    Printf(inoutGeneratedString, "  lua_pop(L, 2);\n");
+    Printf(inoutGeneratedString, "\n");
+  }
+
+
+ /* -----------------------------------------------------------------------------
+   * generateRefUnassociation()
+   *
+   * Remove a memory reference association between objectA and objectB
+   * ----------------------------------------------------------------------------- */
+
+  void generateRefUnassociation(Node *n, String* inoutGeneratedString, bool& outIsReturn) {
+    String *objectA = Getattr(n, "feature:refunassoc:objectA");
+    String *objectB = Getattr(n, "feature:refunassoc:objectB");
+    String *refRule = Getattr(n, "feature:refunassoc:refRule");
+    int objectA_arg_index = -1;
+    int objectB_arg_index = -1;
+    bool is_return = false;
+
+    /* Lua arg indices start at 1 */
+    int count = 1;
+    ParmList *plist = Getattr(n, "parms");
+    while (plist) {
+      String* param_name = Getattr(plist, "name");
+      if(0 == Cmp(objectA, param_name)) {
+        objectA_arg_index = count;
+      }
+      if(0 == Cmp(objectB, param_name)) {
+        objectB_arg_index = count;
+      }
+      count++;
+      plist = nextSibling(plist);
+    }
+
+    /* The way Lua functions are called, we have the args taking 1 to n-args. 
+     * Then the return result result will be placed on the stack at n+1 
+     * (which is where count is at the end of the above loop).
+     */
+    if(0 == Cmp(objectA, "return")) {
+      objectA_arg_index = count;
+      is_return = true;
+    }
+    if(0 == Cmp(objectB, "return")) {
+      objectB_arg_index = count;
+      is_return = true;
+    }
+    /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+    if(objectA_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+      return;
+    }
+    if(objectB_arg_index == -1) {
+      Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+      return;
+    }
+
+    if(0 == Cmp(refRule, ">")) {
+        /* I interpret > as: Make objectA hold a reference to objectB */
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        
+    }
+    else if(0 == Cmp(refRule, "<")) {
+        /* I interpret > as: Make objectB hold a reference to objectA */
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectB_arg_index);
+        Printf(inoutGeneratedString, "  lua_pushvalue(L, %d);\n", objectA_arg_index);
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+
+	}
+    Printf(inoutGeneratedString, "  SWIG_Lua_UnassociateReference(L);\n");
+    Printf(inoutGeneratedString, "  lua_pop(L, 2);\n");
+    Printf(inoutGeneratedString, "\n");
+
+    outIsReturn = is_return;
   }
 
   /* -----------------------------------------------------------------------------
