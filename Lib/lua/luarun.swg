@@ -1607,6 +1607,14 @@ SWIGINTERN void  SWIG_Lua_class_register_instance(lua_State *L,swig_lua_class *c
   lua_pushstring(L,".set");
   lua_newtable(L);
   lua_rawset(L,-3);
+  /* add a table called ".refownerlist". 
+	 Any object in this list will be like a parent object. 
+	 We hold a strong reference to the object to prevent it from being
+  	 garbage collected until after this object has been collected. 
+   */
+  lua_pushstring(L,".refownerlist");
+  lua_newtable(L);
+  lua_rawset(L,-3);
   /* add a table called ".fn" */
   lua_pushstring(L,".fn");
   lua_newtable(L);
@@ -1698,6 +1706,138 @@ SWIGINTERN void SWIG_Lua_elua_class_register_instance(lua_State *L, swig_lua_cla
   assert(lua_gettop(L) == begin);
 }
 #endif /* elua && eluac */
+
+
+
+
+
+/* For objectA and objectB, make objectA hold a reference to objectB
+ * such that objectB cannot be collected until objectA is discarded.
+ * Example: Tree: objectB is a child node of objectA. This will prevent the child (objectB) 
+ * from being collected as long as the root node is alive.
+ * 2 params are expected to be passed in. Function returns with the 2 params still on the stack.
+ */
+SWIGINTERN void SWIG_Lua_AssociateReference(lua_State *L)
+{
+/*  there should be 2 params passed in
+  (2 or -1 aka top of stack) objectB
+  (1 or -2) objectA
+  */
+  size_t array_length;
+  int substack_start = lua_gettop(L) - 2;
+  lua_checkstack(L, 3);
+  assert(lua_isuserdata(L, substack_start+1));  /* just in case */
+  assert(lua_isuserdata(L, substack_start+2));  /* just in case */
+
+  /*
+	 There are two tricky implementation details that this implementation tries to handle.
+	 1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+	 2. A user may want to associate a reference multiple times.
+	 For 1, we need to compare against the underlying C-ptr instead of the user data when 
+	 unassociating (removing) because it may be out of the user's control whether
+	 they have the same userdata wrapper since this is a SWIG implementation detail.
+	 For 2, the easiest thing to do is make this a list instead of an associative array.
+	 This means that every Associate (add) must be balanced by an Unassociate (remove).
+ */
+
+  lua_getmetatable(L,substack_start+1);
+  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
+  assert(lua_istable(L,-1));
+
+
+  array_length = lua_rawlen(L, -1);
+  lua_pushvalue(L, substack_start+2); /* push objectB on the stack */
+  lua_rawseti(L, -2, array_length+1); /* add objectB to the end of objectA's ref array */
+
+  lua_pop(L, 2); /* pop the .refownerlist and metatable */
+
+
+  assert(lua_gettop(L) == substack_start + 2);
+}
+
+SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
+{
+/*  there should be 2 params passed in
+  (2 or -1 aka top of stack) objectB
+  (1 or -2) objectA
+  */
+  int i;
+  size_t array_length;
+  int deleted_index = 0;
+  int substack_start = lua_gettop(L) - 2;
+  int ref_list_table_index;
+  swig_lua_userdata* object_b_user_data;
+  swig_lua_userdata* object_current_user_data;
+  lua_checkstack(L, 3);
+  assert(lua_isuserdata(L, substack_start+1));  /* just in case */
+  assert(lua_isuserdata(L, substack_start+2));  /* just in case */
+  
+  object_b_user_data = (swig_lua_userdata*)lua_touserdata(L, substack_start+2);
+
+
+  /*
+	 There are two tricky implementation details that this implementation tries to handle.
+	 1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+	 2. A user may want to associate a reference multiple times.
+	 For 1, we need to compare against the underlying C-ptr instead of the user data when 
+	 unassociating (removing) because it may be out of the user's control whether
+	 they have the same userdata wrapper since this is a SWIG implementation detail.
+	 For 2, the easiest thing to do is make this a list instead of an associative array.
+	 This means that every Associate (add) must be balanced by an Unassociate (remove).
+ */
+
+  lua_getmetatable(L,substack_start+1);
+  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
+  assert(lua_istable(L,-1));
+  ref_list_table_index = substack_start+4;
+  array_length = lua_rawlen(L, -1);
+
+  /* go backwards to remove at the end of the list */
+  for(i=array_length; i>0; i--)
+  {
+	  lua_rawgeti(L, ref_list_table_index, i);
+	  assert(lua_isuserdata(L, -1));  /* just in case */
+	  object_current_user_data = (swig_lua_userdata*)lua_touserdata(L, -1);
+	  if( (object_current_user_data == object_b_user_data)
+		  || (object_current_user_data->ptr == object_b_user_data->ptr)
+	  )
+	  {
+		  /* We'll just record the index position now. We'll delete the entry below. */
+		  deleted_index = i;
+		  lua_pop(L, 1);
+		  break;
+	  }
+	  lua_pop(L, 1);
+
+  }
+
+  /* Should it be an error if you try to remove an association that doesn't exist?
+	 If so, deleted_index == 0 at this point. You can use that to check.
+  */
+
+  /* We don't want to leave holes in the Lua array, so shift all the entries back overwriting the deleted slot. */
+  if(deleted_index != 0)
+  {
+	  for(i=deleted_index; i<array_length; i++)
+	  {
+		  lua_rawgeti(L, ref_list_table_index, i+1); /* push the object at i+1 onto the stack */
+		  lua_rawseti(L, ref_list_table_index, i); /* move the object into the current (i) slot */
+	  }
+	  /* now delete the last spot */
+	  lua_pushnil(L);
+	  lua_rawseti(L, ref_list_table_index, array_length); /* move the object into the current (i) slot */
+  }
+
+
+
+
+  lua_pop(L, 2); /* pop the .refownerlist and metatable */
+  assert(lua_gettop(L) == substack_start + 2);
+
+}
+
+
+
 
 /* -----------------------------------------------------------------------------
  * Class/structure conversion fns

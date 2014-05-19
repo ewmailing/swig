@@ -241,6 +241,13 @@ protected:
   virtual int emitFunctionDispatcher(Node *n, bool /*is_member */ );
 
   /**
+   * Generates code for the refassoc %feature and puts it in a string.
+   * Note that is does not emit the code.
+   */
+  virtual void generateRefAssociation(Node *n, String *inoutGeneratedString);
+  virtual void generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn);
+
+  /**
    * Generates code for a getter function.
    */
   virtual int emitGetter(Node *n, bool is_member, bool is_static);
@@ -1199,6 +1206,41 @@ int JSEmitter::emitFunction(Node *n, bool is_member, bool is_static) {
   emit_parameter_variables(params, wrapper);
   emit_attach_parmmaps(params, wrapper);
 
+
+
+      /* Handle refassoc/refunassoc %feature */
+    String *refUnassociationGeneratedString = NewString("");
+    bool refUnassocIsReturn = false;
+    String *feature_refunassoc = Getattr(n, "feature:refunassoc");
+    if(feature_refunassoc) {
+        generateRefUnassociation(n, refUnassociationGeneratedString, refUnassocIsReturn);
+        /* SWIG has an internal mechanism called wrap:postaction and wrap:preaction which seems little used.
+         * (One use in Python?)
+         * postaction allows code to be injected right after the underlying native function call, 
+         * but before the SWIG wrapper cleans up and returns. 
+         * preaction allows code to be injected before the function call.
+         * postaction is almost, but not quite perfect for us. 
+         * The piece that puts the return value into a userdata comes after postaction which is a vital
+         * part that we need, particularly when the return value is one of the objects.
+         * For the Unassociation case, 
+         * unless the user has specified the return value as one of the objects, we want to use preaction.
+         * This is because it is possible this is a function that frees objects, so we don't want to risk
+         * using dangling pointers.
+         */
+        if(refUnassocIsReturn) {
+          /* Defer until after the userdata is created */
+        }
+        else {
+          String* preaction = Getattr(n, "wrap:preaction");
+          if(preaction) {
+            Append(refUnassociationGeneratedString, preaction);
+          }
+          Setattr(n, "wrap:preaction", refUnassociationGeneratedString);      
+        }
+    }
+    
+
+
   // HACK: in test-case `ignore_parameter` emit_attach_parmmaps generates an extra line of applied typemap.
   // Deleting wrapper->code here fixes the problem, and seems to have no side effect elsewhere
   Delete(wrapper->code);
@@ -1207,6 +1249,24 @@ int JSEmitter::emitFunction(Node *n, bool is_member, bool is_static) {
   marshalInputArgs(n, params, wrapper, Function, is_member, is_static);
   String *action = emit_action(n);
   marshalOutput(n, params, wrapper, action);
+
+     if(feature_refunassoc) {
+        /* Handle the deferred case */
+        if(refUnassocIsReturn) {
+	      Printf(wrapper->code, "%s", refUnassociationGeneratedString);
+        }
+    }
+    Delete(refUnassociationGeneratedString);
+
+    String *feature_refassoc = Getattr(n, "feature:refassoc");
+    if(feature_refassoc) {
+      String *refAssociationGeneratedString = NewString("");
+      generateRefAssociation(n, refAssociationGeneratedString);
+      Printf(wrapper->code, "%s", refAssociationGeneratedString);
+      Delete(refAssociationGeneratedString);
+    }
+
+
   emitCleanupCode(n, wrapper, params);
   Replaceall(wrapper->code, "$symname", iname);
 
@@ -1215,7 +1275,6 @@ int JSEmitter::emitFunction(Node *n, bool is_member, bool is_static) {
       .replace("$jscode", wrapper->code)
       .replace("$jsargcount", Getattr(n, ARGCOUNT))
       .pretty_print(f_wrappers);
-
 
   DelWrapper(wrapper);
 
@@ -1272,6 +1331,15 @@ int JSEmitter::emitFunctionDispatcher(Node *n, bool /*is_member */ ) {
   DelWrapper(wrapper);
 
   return SWIG_OK;
+}
+
+
+void JSEmitter:: generateRefAssociation(Node *n, String *inoutGeneratedString) {
+  Printf(stderr, "WARNING: Expecting subclass to implement %feature refassoc\n");
+}
+
+void JSEmitter:: generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn) {
+  Printf(stderr, "WARNING: Expecting subclass to implement %feature refunassoc\n");
 }
 
 String *JSEmitter::emitInputTypemap(Node *n, Parm *p, Wrapper *wrapper, String *arg) {
@@ -1477,6 +1545,8 @@ protected:
   virtual void marshalInputArgs(Node *n, ParmList *parms, Wrapper *wrapper, MarshallingMode mode, bool is_member, bool is_static);
   virtual Hash *createNamespaceEntry(const char *name, const char *parent);
   virtual int emitNamespaces();
+  virtual void generateRefAssociation(Node *n, String *inoutGeneratedString);
+  virtual void generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn);
   virtual int emitNativeWrapper(Node *n);
 
 private:
@@ -1825,6 +1895,168 @@ int JSCEmitter::emitNamespaces() {
   return SWIG_OK;
 }
 
+
+void JSCEmitter::generateRefAssociation(Node *n, String *inoutGeneratedString) {
+  String *objectA = Getattr(n, "feature:refassoc:objectA");
+  String *objectB = Getattr(n, "feature:refassoc:objectB");
+  String *refRule = Getattr(n, "feature:refassoc:refRule");
+  int objectA_arg_index = -1;
+  int objectB_arg_index = -1;
+
+  /* argv indices start at 0 */
+  int count = 0;
+  ParmList *plist = Getattr(n, "parms");
+  while (plist) {
+    String* param_name = Getattr(plist, "name");
+    if(0 == Cmp(objectA, param_name)) {
+      objectA_arg_index = count;
+    }
+    if(0 == Cmp(objectB, param_name)) {
+      objectB_arg_index = count;
+    }
+    count++;
+    plist = nextSibling(plist);
+  }
+
+  /* If return, set the count to some other marker value so we can distinguish between that and not-found */
+  if(0 == Cmp(objectA, "return")) {
+    objectA_arg_index = -2;
+  }
+  if(0 == Cmp(objectB, "return")) {
+    objectB_arg_index = -2;
+  }
+  /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+  if(objectA_arg_index == -1) {
+    Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+    return;
+  }
+  if(objectB_arg_index == -1) {
+    Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+    return;
+  }
+
+  Printf(inoutGeneratedString, "\n\n");
+  if(0 == Cmp(refRule, ">")) {
+      /* I interpret > as: Make objectA hold a reference to objectB */
+      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReferenceWithJSValueRefs(context, ");
+      if(0 == Cmp(objectA, "return")) {
+        Printf(inoutGeneratedString, "jsresult, ");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d], ", objectA_arg_index);
+      }
+      if(0 == Cmp(objectB, "return")) {
+        Printf(inoutGeneratedString, "jsresult);\n");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d]);\n", objectB_arg_index);
+      }
+  }
+  else if(0 == Cmp(refRule, "<")) {
+      /* I interpret > as: Make objectB hold a reference to objectA */
+      Printf(inoutGeneratedString, "  SWIGJSC_AssociateReferenceWithJSValueRefs(context, ");
+      if(0 == Cmp(objectB, "return")) {
+        Printf(inoutGeneratedString, "jsresult, ");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d], ", objectB_arg_index);
+      }
+      if(0 == Cmp(objectA, "return")) {
+        Printf(inoutGeneratedString, "jsresult);\n");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d]);\n", objectA_arg_index);
+      }
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+	}
+  Printf(inoutGeneratedString, "\n");
+}
+
+void JSCEmitter::generateRefUnassociation(Node *n, String* inoutGeneratedString, bool& outIsReturn) {
+  String *objectA = Getattr(n, "feature:refunassoc:objectA");
+  String *objectB = Getattr(n, "feature:refunassoc:objectB");
+  String *refRule = Getattr(n, "feature:refunassoc:refRule");
+  int objectA_arg_index = -1;
+  int objectB_arg_index = -1;
+  bool is_return = false;
+
+  /* argv indices start at 0 */
+  int count = 0;
+  ParmList *plist = Getattr(n, "parms");
+  while (plist) {
+    String* param_name = Getattr(plist, "name");
+    if(0 == Cmp(objectA, param_name)) {
+      objectA_arg_index = count;
+    }
+    if(0 == Cmp(objectB, param_name)) {
+      objectB_arg_index = count;
+    }
+    count++;
+    plist = nextSibling(plist);
+  }
+
+  /* The way Lua functions are called, we have the args taking 1 to n-args. 
+   * Then the return result result will be placed on the stack at n+1 
+   * (which is where count is at the end of the above loop).
+   */
+  if(0 == Cmp(objectA, "return")) {
+    objectA_arg_index = -2;
+    is_return = true;
+  }
+  if(0 == Cmp(objectB, "return")) {
+    objectB_arg_index = -2;
+    is_return = true;
+  }
+  /* TODO: Probably should have an assert to make sure the function actually returns something and both objects aren't the same */
+
+  if(objectA_arg_index == -1) {
+    Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectA for refAssoc feature\n", objectA);
+    return;
+  }
+  if(objectB_arg_index == -1) {
+    Swig_error(input_file, line_number, "Did not find argument matching the name: %s for objectB for refAssoc feature\n", objectB);
+    return;
+  }
+
+  if(0 == Cmp(refRule, ">")) {
+      /* I interpret > as: Make objectA hold a reference to objectB */
+      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReferenceWithJSValueRefs(context, ");
+      if(0 == Cmp(objectA, "return")) {
+        Printf(inoutGeneratedString, "jsresult, ");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d], ", objectA_arg_index);
+      }
+      if(0 == Cmp(objectB, "return")) {
+        Printf(inoutGeneratedString, "jsresult);\n");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d]);\n", objectB_arg_index);
+      }
+  }
+  else if(0 == Cmp(refRule, "<")) {
+      /* I interpret > as: Make objectB hold a reference to objectA */
+      Printf(inoutGeneratedString, "  SWIGJSC_UnassociateReferenceWithJSValueRefs(context, ");
+      if(0 == Cmp(objectB, "return")) {
+        Printf(inoutGeneratedString, "jsresult, ");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d], ", objectB_arg_index);
+      }
+      if(0 == Cmp(objectA, "return")) {
+        Printf(inoutGeneratedString, "jsresult);\n");
+      } else {
+        Printf(inoutGeneratedString, "argv[%d]);\n", objectA_arg_index);
+      }
+    }
+	else {
+      Swig_error(input_file, line_number, "Invalid refRule: %s for refAssoc feature\n", refRule);
+      return;
+	}
+  Printf(inoutGeneratedString, "\n");
+
+  outIsReturn = is_return;
+}
+
+
+
 int JSCEmitter::emitNativeWrapper(Node *n) {
   String *symname = Getattr(n, "sym:name");
   String *wrapname = Getattr(n, "wrap:name");
@@ -1865,6 +2097,9 @@ public:
 protected:
   virtual void marshalInputArgs(Node *n, ParmList *parms, Wrapper *wrapper, MarshallingMode mode, bool is_member, bool is_static);
   virtual int emitNamespaces();
+  virtual void generateRefAssociation(Node *n, String *inoutGeneratedString);
+  virtual void generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn);
+  
 
 protected:
   /* built-in parts */
@@ -2267,6 +2502,15 @@ int V8Emitter::emitNamespaces() {
 
   return SWIG_OK;
 }
+
+void V8Emitter::generateRefAssociation(Node *n, String *inoutGeneratedString) {
+  Printf(stderr, "WARNING: %feature refassoc not implemented for v8\n");
+}
+
+void V8Emitter::generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn) {
+  Printf(stderr, "WARNING: %feature refunassoc not implemented for v8\n");
+}
+
 
 JSEmitter *swig_javascript_create_V8Emitter() {
   return new V8Emitter();

@@ -313,3 +313,152 @@ JSValueRef SWIGJSC_AppendOutput(JSContextRef context, JSValueRef value, JSValueR
   JSObjectSetPropertyAtIndex(context, arr, length, obj, 0);
   return arr;
 }
+
+
+
+
+/* For objectA and objectB, make objectA hold a reference to objectB
+ * such that objectB cannot be collected until objectA is discarded.
+ * Example: Tree: objectB is a child node of objectA. This will prevent the child (objectB) 
+ * from being collected as long as the root node is alive.
+ * 2 params are expected to be passed in. Function returns with the 2 params still on the stack.
+ */
+SWIGRUNTIME void SWIGJSC_AssociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
+{
+  /*
+    There are two tricky implementation details that this implementation tries to handle.
+    1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+    2. A user may want to associate a reference multiple times.
+    For 1, we need to compare against the underlying C-ptr instead of the user data when 
+    unassociating (removing) because it may be out of the user's control whether
+    they have the same userdata wrapper since this is a SWIG implementation detail.
+    For 2, the easiest thing to do is make this a list instead of an associative array.
+    This means that every Associate (add) must be balanced by an Unassociate (remove).
+   */
+
+ /* I tried extremely hard to implement this using only the C-API and keep the details hidden/private
+    from the user, but I don't think it is possible with JavaScriptCore.
+    The fundamental problem is that I don't see any way to make one object hold a reference to another
+    from the C-API. The closest thing is JSValueProtect (which you will find my attempt in the commit history).
+    But the problem is that JSCore disallows you from calling JSValueUnprotect during the finalizer.
+    So it is impossible to break the reference and allow referenced objects to go free when the holding 
+    object gets collected.
+    So this implementation uses JavaScript directly to create a new hidden property (array)
+    on the object which will store the references. The normal GC system will handle this correctly.
+    The implementation is tricky because JSCore doesn't make it that easy to do what we need.
+    Ultimately, we need to call a function that passes objectA and objectB which will create the reference
+    array and add objectB to the list.
+    But JSCore doesn't just let us pass objectA and objectB to JSEvaluateScript.
+    So instead, we need to create a script that returns a function object which contains the implementation
+    of what we need to do.
+    Then we use that returned function object and invoke it with JSObjectCallAsFunction,
+    because this function will allow us to pass our 2 JSObjectRefs for objectA and objectB.
+    This works, but does create a visible (array) property: _swigRefAssocList on objectA.
+  */
+  JSObjectRef js_function_object;
+  JSValueRef js_result;
+  JSStringRef js_script_string;
+  const JSValueRef arguments[2] = {objectA, objectB};
+  js_script_string = JSStringCreateWithUTF8CString(
+"(function () {\n"
+  "return function (objectA, objectB) {\n"
+    "if(typeof objectA._swigRefAssocList === 'undefined') {\n"
+      "objectA._swigRefAssocList = [];\n"
+    "}\n"
+    "objectA._swigRefAssocList.push(objectB);\n"
+  "}\n"
+"}());\n"
+    );
+    js_result = JSEvaluateScript(context, js_script_string, NULL, NULL, 0, NULL);
+    js_function_object = JSValueToObject(context, js_result, NULL);
+
+    JSObjectCallAsFunction(context, js_function_object, NULL, 2, arguments, NULL);
+    JSStringRelease(js_script_string);
+}
+
+SWIGRUNTIME void SWIGJSC_UnassociateReference(JSContextRef context, JSObjectRef objectA, JSObjectRef objectB)
+{
+  /*
+	 There are two tricky implementation details that this implementation tries to handle.
+	 1. SWIG may have multiple userdata wrapper instances for the same underlying C-ptr.
+	 2. A user may want to associate a reference multiple times.
+	 For 1, we need to compare against the underlying C-ptr instead of the user data when 
+	 unassociating (removing) because it may be out of the user's control whether
+	 they have the same userdata wrapper since this is a SWIG implementation detail.
+	 For 2, the easiest thing to do is make this a list instead of an associative array.
+	 This means that every Associate (add) must be balanced by an Unassociate (remove).
+ */
+
+ /* I tried extremely hard to implement this using only the C-API and keep the details hidden/private
+    from the user, but I don't think it is possible with JavaScriptCore.
+    The fundamental problem is that I don't see any way to make one object hold a reference to another
+    from the C-API. The closest thing is JSValueProtect (which you will find my attempt in the commit history).
+    But the problem is that JSCore disallows you from calling JSValueUnprotect during the finalizer.
+    So it is impossible to break the reference and allow referenced objects to go free when the holding 
+    object gets collected.
+    So this implementation uses JavaScript directly to create a new hidden property (array)
+    on the object which will store the references. The normal GC system will handle this correctly.
+    The implementation is tricky because JSCore doesn't make it that easy to do what we need.
+    Ultimately, we need to call a function that passes objectA and objectB which will create the reference
+    array and add objectB to the list.
+    But JSCore doesn't just let us pass objectA and objectB to JSEvaluateScript.
+    So instead, we need to create a script that returns a function object which contains the implementation
+    of what we need to do.
+    Then we use that returned function object and invoke it with JSObjectCallAsFunction,
+    because this function will allow us to pass our 2 JSObjectRefs for objectA and objectB.
+    This works, but does create a visible (array) property: _swigRefAssocList on objectA.
+  */
+  /* Note: This implementation depends on 'equals' (_wrap_SwigObject_equals) in _SwigObject_functions.
+     This relies on C-ptr comparisons which 'equals' does.
+   */
+  JSObjectRef js_function_object;
+  JSValueRef js_result;
+  JSStringRef js_script_string;
+  const JSValueRef arguments[2] = {objectA, objectB};
+  js_script_string = JSStringCreateWithUTF8CString(
+"(function () {\n"
+  "return function (objectA, objectB) {\n"
+    "var i;\n"
+    "var delete_index = -1;\n"
+    "if(typeof objectA._swigRefAssocList === 'undefined') {\n"
+      "return;\n"
+    "}\n"
+    "for(i=objectA._swigRefAssocList.length-1; i>=0; i--) {\n"
+      "if(objectA.equals(objectB)) {\n"
+        "delete_index = i;\n"
+        "break;\n"
+      "}\n"
+    "}\n"
+    "if(delete_index > -1) {\n"
+      "objectA._swigRefAssocList.splice(delete_index, 1);\n"
+    "}\n"
+  "}\n"
+"}());\n"
+  );
+
+  js_result = JSEvaluateScript(context, js_script_string, NULL, NULL, 0, NULL);
+  js_function_object = JSValueToObject(context, js_result, NULL);
+
+  JSObjectCallAsFunction(context, js_function_object, NULL, 2, arguments, NULL);
+  JSStringRelease(js_script_string);  
+}
+
+/* This is a convenience wrapper function to convert types because the SWIG implementation mostly uses JSValueRef
+   and not JSObjectRef.
+   The assumption is that all JSValueRefs passed to this function MUST be convertable to JSObjectRefs.
+*/
+SWIGRUNTIME void SWIGJSC_AssociateReferenceWithJSValueRefs(JSContextRef context, JSValueRef objectA, JSValueRef objectB) {
+  JSObjectRef objectAref;
+  JSObjectRef objectBref;
+  objectAref = JSValueToObject(context, objectA, NULL);
+  objectBref = JSValueToObject(context, objectB, NULL);
+  SWIGJSC_AssociateReference(context, objectAref, objectBref);
+}
+SWIGRUNTIME void SWIGJSC_UnassociateReferenceWithJSValueRefs(JSContextRef context, JSValueRef objectA, JSValueRef objectB) {
+  JSObjectRef objectAref;
+  JSObjectRef objectBref;
+  objectAref = JSValueToObject(context, objectA, NULL);
+  objectBref = JSValueToObject(context, objectB, NULL);
+  SWIGJSC_UnassociateReference(context, objectAref, objectBref);
+}
+
