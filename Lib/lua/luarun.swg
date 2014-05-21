@@ -1034,9 +1034,8 @@ SWIGINTERN void SWIG_Lua_clean_refownerlist(lua_State *L)
     lua_rawgeti(L, ref_list_table_index, i);
     registry_index = lua_tointeger(L, -1);
 
-    /* for debugging */
     
-    /*
+#if 0 /* for debugging */
     {
       void* object_current_user_data;
       swig_lua_userdata *userData1;
@@ -1049,7 +1048,7 @@ SWIGINTERN void SWIG_Lua_clean_refownerlist(lua_State *L)
       printf("<current_user_data[%d] class:%s userdata:%p cptr:%p reg_index=%d\n", i, clss1->name, userData1, userData1->ptr, registry_index);
       lua_pop(L, 1);
     }
-  */
+#endif /* for debugging */
 
     /* release the reference in the registry */
     luaL_unref(L, LUA_REGISTRYINDEX, registry_index);
