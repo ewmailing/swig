@@ -1334,12 +1334,12 @@ int JSEmitter::emitFunctionDispatcher(Node *n, bool /*is_member */ ) {
 }
 
 
-void JSEmitter:: generateRefAssociation(Node *n, String *inoutGeneratedString) {
-  Printf(stderr, "WARNING: Expecting subclass to implement %feature refassoc\n");
+void JSEmitter:: generateRefAssociation(Node *, String *) {
+  Printf(stderr, "WARNING: Expecting subclass to implement feature refassoc\n");
 }
 
-void JSEmitter:: generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn) {
-  Printf(stderr, "WARNING: Expecting subclass to implement %feature refunassoc\n");
+void JSEmitter:: generateRefUnassociation(Node *, String *, bool& ) {
+  Printf(stderr, "WARNING: Expecting subclass to implement feature refunassoc\n");
 }
 
 String *JSEmitter::emitInputTypemap(Node *n, Parm *p, Wrapper *wrapper, String *arg) {
@@ -2569,12 +2569,12 @@ int V8Emitter::emitNamespaces() {
   return SWIG_OK;
 }
 
-void V8Emitter::generateRefAssociation(Node *n, String *inoutGeneratedString) {
-  Printf(stderr, "WARNING: %feature refassoc not implemented for v8\n");
+void V8Emitter::generateRefAssociation(Node *, String *) {
+  Printf(stderr, "WARNING: feature refassoc not implemented for v8\n");
 }
 
-void V8Emitter::generateRefUnassociation(Node *n, String *inoutGeneratedString, bool& outIsReturn) {
-  Printf(stderr, "WARNING: %feature refunassoc not implemented for v8\n");
+void V8Emitter::generateRefUnassociation(Node *, String *, bool& ) {
+  Printf(stderr, "WARNING: feature refunassoc not implemented for v8\n");
 }
 
 
