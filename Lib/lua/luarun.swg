@@ -175,6 +175,12 @@ typedef struct swig_elua_entry {
 
 #endif
 
+/* lua_setuservalue/lua_getuservalue was introduced in Lua 5.2 */
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 502
+#define lua_setuservalue lua_setfenv
+#define lua_getuservalue lua_getfenv
+#endif
+
 /*
    Back in Lua 5.0, there was only lua_Number which was by default a double.
 
@@ -1008,6 +1014,52 @@ SWIGINTERN int  SWIG_Lua_class_set(lua_State *L)
   return 0;
 }
 
+SWIGINTERN void SWIG_Lua_clean_refownerlist(lua_State *L)
+{
+  /* The userdata should be at the top of the stack (index -1) */
+
+  int ref_list_table_index;
+  int array_length;
+  int i;
+  int registry_index;
+
+  lua_getuservalue(L, -1);
+  SWIG_Lua_get_table(L,"refownerlist"); /* find the refownerlist table in objectA */
+  assert(lua_istable(L,-1));
+  ref_list_table_index = lua_absindex(L, -1);
+  array_length = (int)lua_rawlen(L, -1);
+
+  for(i=1; i<=array_length; i++)
+  {
+    lua_rawgeti(L, ref_list_table_index, i);
+    registry_index = lua_tointeger(L, -1);
+
+    /* for debugging */
+    
+    /*
+    {
+      void* object_current_user_data;
+      swig_lua_userdata *userData1;
+      swig_lua_class* clss1;
+      /* get the value back so we can print it */
+      lua_rawgeti(L, LUA_REGISTRYINDEX, registry_index);
+      object_current_user_data = lua_touserdata(L, -1);
+      userData1 = (swig_lua_userdata*)object_current_user_data; /* get the userdata address for later */
+      clss1 = (swig_lua_class*)userData1->type->clientdata;  /* get the class */
+      printf("<current_user_data[%d] class:%s userdata:%p cptr:%p reg_index=%d\n", i, clss1->name, userData1, userData1->ptr, registry_index);
+      lua_pop(L, 1);
+    }
+  */
+
+    /* release the reference in the registry */
+    luaL_unref(L, LUA_REGISTRYINDEX, registry_index);
+
+    lua_pop(L, 1);
+  }
+
+  lua_pop(L, 2); /* pop the refownerlist and uservaluetable */
+}
+
 /* the class.destruct method called by the interpreter */
 SWIGINTERN int  SWIG_Lua_class_destruct(lua_State *L)
 {
@@ -1017,6 +1069,12 @@ SWIGINTERN int  SWIG_Lua_class_destruct(lua_State *L)
   swig_lua_class *clss;
   assert(lua_isuserdata(L,-1));  /* just in case */
   usr=(swig_lua_userdata*)lua_touserdata(L,-1);  /* get it */
+
+  /* Handle/cleanup features such as refassoc in the uservalue table 
+     which is about to be destroyed with the userdata 
+   */
+  SWIG_Lua_clean_refownerlist(L);
+
   /* if must be destroyed & has a destructor */
   if (usr->own) /* if must be destroyed */
   {
@@ -1607,14 +1665,6 @@ SWIGINTERN void  SWIG_Lua_class_register_instance(lua_State *L,swig_lua_class *c
   lua_pushstring(L,".set");
   lua_newtable(L);
   lua_rawset(L,-3);
-  /* add a table called ".refownerlist". 
-	 Any object in this list will be like a parent object. 
-	 We hold a strong reference to the object to prevent it from being
-  	 garbage collected until after this object has been collected. 
-   */
-  lua_pushstring(L,".refownerlist");
-  lua_newtable(L);
-  lua_rawset(L,-3);
   /* add a table called ".fn" */
   lua_pushstring(L,".fn");
   lua_newtable(L);
@@ -1723,7 +1773,8 @@ SWIGINTERN void SWIG_Lua_AssociateReference(lua_State *L)
   (2 or -1 aka top of stack) objectB
   (1 or -2) objectA
   */
-  size_t array_length;
+  int array_length;
+  int registry_index;
   int substack_start = lua_gettop(L) - 2;
   lua_checkstack(L, 3);
   assert(lua_isuserdata(L, substack_start+1));  /* just in case */
@@ -1740,16 +1791,39 @@ SWIGINTERN void SWIG_Lua_AssociateReference(lua_State *L)
 	 This means that every Associate (add) must be balanced by an Unassociate (remove).
  */
 
-  lua_getmetatable(L,substack_start+1);
-  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
+  lua_getuservalue(L,substack_start+1);
+  SWIG_Lua_get_table(L,"refownerlist"); /* find the refownerlist table in objectA */
   assert(lua_istable(L,-1));
 
 
-  array_length = lua_rawlen(L, -1);
+  array_length = (int)lua_rawlen(L, -1);
   lua_pushvalue(L, substack_start+2); /* push objectB on the stack */
-  lua_rawseti(L, -2, array_length+1); /* add objectB to the end of objectA's ref array */
 
-  lua_pop(L, 2); /* pop the .refownerlist and metatable */
+  /* Unfortunately, my original idea to just put objectB in the array doesn't work 
+     in the final garbage collection sweep. Lua seems to be aware that objectA holds objectB
+     and will collect them in the same pass instead of getting the finalize callback for objectA
+     first, and then releasing objectB and getting the finalize callback for that. 
+     The order is the reverse order of when the __gc metamethods were defined,
+     which is not helpful to us since we don't control the creation order of the objects.
+     So to workaround this, we can create a layer of indirection by referencing objectB
+     in the Lua Registry with luaL_ref. This way the object stays rooted until we call luaL_unref.
+     We can call luaL_unref in the finalizer.
+     The one annoying problem I can't solve for the user is lua_close.
+     With lua_close, Lua frees everything in one pass, including the registry which means
+     we lose control of the tear down order.
+     If you only care about keeping references to other objects and not tear down order,
+     you don't have to worry about this.
+     If you do care about tear down order, before lua_close, all rooted objects should be nil'd
+     and a full garbage collection sweep should be invoked.
+     Users can set their objects to nil and call collectgarbage, 
+     or you can get clever and iterate through all keys in _G
+     and set the references to nil, and then collect garbage on their behalf.
+  */
+  registry_index = luaL_ref(L, LUA_REGISTRYINDEX); /* store it in the registry to force a reference that Lua will (mostly) require us to manually release */
+  lua_pushinteger(L, registry_index);  
+  lua_rawseti(L, -2, array_length+1); /* add objectB registry index to the end of objectA's ref array */
+
+  lua_pop(L, 2); /* pop the refownerlist and uservalue table */
 
 
   assert(lua_gettop(L) == substack_start + 2);
@@ -1762,7 +1836,8 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
   (1 or -2) objectA
   */
   int i;
-  size_t array_length;
+  int array_length;
+  int registry_index;
   int deleted_index = 0;
   int substack_start = lua_gettop(L) - 2;
   int ref_list_table_index;
@@ -1786,28 +1861,35 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
 	 This means that every Associate (add) must be balanced by an Unassociate (remove).
  */
 
-  lua_getmetatable(L,substack_start+1);
-  SWIG_Lua_get_table(L,".refownerlist"); /* find the .refownerlist table in objectA */
+  lua_getuservalue(L,substack_start+1);
+  SWIG_Lua_get_table(L,"refownerlist"); /* find the refownerlist table in objectA */
   assert(lua_istable(L,-1));
   ref_list_table_index = substack_start+4;
-  array_length = lua_rawlen(L, -1);
+  array_length = (int)lua_rawlen(L, -1);
 
   /* go backwards to remove at the end of the list */
   for(i=array_length; i>0; i--)
   {
 	  lua_rawgeti(L, ref_list_table_index, i);
-	  assert(lua_isuserdata(L, -1));  /* just in case */
+    registry_index = lua_tointeger(L, -1);
+    /* get the userdata back so we can compare it */
+    lua_rawgeti(L, LUA_REGISTRYINDEX, registry_index);
+
 	  object_current_user_data = (swig_lua_userdata*)lua_touserdata(L, -1);
 	  if( (object_current_user_data == object_b_user_data)
 		  || (object_current_user_data->ptr == object_b_user_data->ptr)
 	  )
 	  {
-		  /* We'll just record the index position now. We'll delete the entry below. */
+		  /* We'll just record the index position now. We'll delete entry in the array below. */
 		  deleted_index = i;
-		  lua_pop(L, 1);
+
+      /* remove the object from the registry so it can be released */
+      luaL_unref(L, LUA_REGISTRYINDEX, registry_index);
+		  
+      lua_pop(L, 2); /* pops the current userdata and the registry index */
 		  break;
 	  }
-	  lua_pop(L, 1);
+	  lua_pop(L, 2); /* pops the current userdata and the registry index */
 
   }
 
@@ -1831,7 +1913,7 @@ SWIGINTERN void SWIG_Lua_UnassociateReference(lua_State *L)
 
 
 
-  lua_pop(L, 2); /* pop the .refownerlist and metatable */
+  lua_pop(L, 2); /* pop the refownerlist and uservalue table */
   assert(lua_gettop(L) == substack_start + 2);
 
 }
@@ -1860,6 +1942,30 @@ SWIGINTERN void SWIG_Lua_AddMetatable(lua_State *L,swig_type_info *type)
   }
 }
 
+/* helper to add uservalue (table) to new lua object, good for storing additional references supporting future features */
+SWIGINTERN void SWIG_Lua_AddUserValue(lua_State *L)
+{
+  /* This is ths uservalue table. 
+   * We are going to make it a container table so everybody can use it to add their own features.
+   * So make new, unique keys inside this table for your specific featurs.
+   */
+  lua_newtable(L);
+
+
+    /* refassoc feature: is an array (table) with the key refownerlist */
+    lua_pushstring(L,"refownerlist");
+    lua_newtable(L);
+    lua_rawset(L, -3); /* set inside the uservalue table */
+
+    /* Future SWIG developers: Add your stuff here. */
+
+
+  /* set the uservalue table */
+  lua_setuservalue(L, -2);
+}
+
+
+
 /* pushes a new object into the lua stack */
 SWIGRUNTIME void SWIG_Lua_NewPointerObj(lua_State *L,void *ptr,swig_type_info *type, int own)
 {
@@ -1874,6 +1980,7 @@ SWIGRUNTIME void SWIG_Lua_NewPointerObj(lua_State *L,void *ptr,swig_type_info *t
   usr->own=own;
 #if (SWIG_LUA_TARGET != SWIG_LUA_FLAVOR_ELUAC)
   SWIG_Lua_AddMetatable(L,type); /* add metatable */
+  SWIG_Lua_AddUserValue(L);
 #endif
 }
 
@@ -1928,6 +2035,7 @@ SWIGRUNTIME void SWIG_Lua_NewPackedObj(lua_State *L,void *ptr,size_t size,swig_t
   raw->own=0;
   memcpy(raw->data,ptr,size); /* copy the data */
   SWIG_Lua_AddMetatable(L,type); /* add metatable */
+  SWIG_Lua_AddUserValue(L);
 }
     
 /* converts a packed userdata. user for member fn pointers only */
