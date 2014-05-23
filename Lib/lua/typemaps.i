@@ -66,7 +66,7 @@ or provide a %apply statement
 %enddef
 
 %define SWIG_INTEGER_TYPEMAP(TYPE)
-%typemap(in,checkfn="lua_isinteger")	TYPE *INPUT($*ltype temp), TYPE &INPUT($*ltype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger")	TYPE *INPUT($*ltype temp), TYPE &INPUT($*ltype temp)
 %{ temp = ($*ltype)lua_tointeger(L,$input);
    $1 = &temp; %}
 %typemap(in, numinputs=0) TYPE *OUTPUT ($*ltype temp)
@@ -80,7 +80,7 @@ or provide a %apply statement
 %typemap(in) TYPE &INOUT = TYPE *INPUT;
 %typemap(argout) TYPE &INOUT = TYPE *OUTPUT;
 // const version (the $*ltype is the basic number without ptr or const's)
-%typemap(in,checkfn="lua_isinteger")	const TYPE *INPUT($*ltype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger")	const TYPE *INPUT($*ltype temp)
 %{ temp = ($*ltype)lua_tointeger(L,$input);
    $1 = &temp; %}
 %enddef
