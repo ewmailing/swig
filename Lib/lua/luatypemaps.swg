@@ -17,7 +17,7 @@
    to reflect the number of values returned (normally SWIG_arg++; will do)
 */
 // numbers
-%typemap(in,checkfn="lua_isinteger") int, short, long,
+%typemap(in,checkfn="SWIG_Lua_isinteger") int, short, long,
              signed char, long long
 %{$1 = ($type)lua_tointeger(L, $input);%}
 
@@ -25,7 +25,7 @@
 %{$1 = ($type)lua_tonumber(L, $input);%}
 
 // additional check for unsigned numbers, to not permit negative input
-%typemap(in,checkfn="lua_isinteger") unsigned int,
+%typemap(in,checkfn="SWIG_Lua_isinteger") unsigned int,
              unsigned short, unsigned long, unsigned char, unsigned long long
 %{SWIG_contract_assert((lua_tounsigned(L,$input)>=0),"number must not be negative")
 $1 = ($type)lua_tounsigned(L, $input);%}
@@ -48,10 +48,10 @@ $1 = ($type)lua_tounsigned(L, $input);%}
 // SWIG assumes that this code will need a pointer to int to be passed in
 // (this might be ok for objects by const ref, but not for numeric primitives)
 // therefore we add a set of typemaps to fix this (for both in & out)
-%typemap(in,checkfn="lua_isinteger") const int&($basetype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger") const int&($basetype temp)
 %{ temp=($basetype)lua_tointeger(L,$input); $1=&temp;%}
 
-%typemap(in,checkfn="lua_isinteger") const unsigned int&($basetype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger") const unsigned int&($basetype temp)
 %{SWIG_contract_assert((lua_tounsigned(L,$input)>=0),"number must not be negative")
 temp=($basetype)lua_tounsigned(L,$input); $1=&temp;%}
 
@@ -71,16 +71,16 @@ temp=($basetype)lua_tounsigned(L,$input); $1=&temp;%}
 /* enums have to be handled slightly differently
 	VC++ .net will not allow a cast from lua_Number(double) to enum directly.
 */
-%typemap(in,checkfn="lua_isinteger") enum SWIGTYPE
+%typemap(in,checkfn="SWIG_Lua_isinteger") enum SWIGTYPE
 %{$1 = ($type)(int)lua_tointeger(L, $input);%}
 
 %typemap(out) enum SWIGTYPE
 %{  lua_pushinteger(L, (lua_Integer)(int)($1)); SWIG_arg++;%}
 
 // and const refs
-%typemap(in,checkfn="lua_isinteger") const enum SWIGTYPE &($basetype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger") const enum SWIGTYPE &($basetype temp)
 %{ temp=($basetype)(int)lua_tointeger(L,$input); $1=&temp;%}
-%typemap(in,checkfn="lua_isinteger") const enum SWIGTYPE &&($basetype temp)
+%typemap(in,checkfn="SWIG_Lua_isinteger") const enum SWIGTYPE &&($basetype temp)
 %{ temp=($basetype)(int)lua_tointeger(L,$input); $1=&temp;%}
 %typemap(out) const enum SWIGTYPE &
 %{  lua_pushinteger(L, (lua_Integer) *$1); SWIG_arg++;%}
