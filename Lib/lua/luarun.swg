@@ -214,7 +214,20 @@ typedef struct swig_elua_entry {
 #endif
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 503
-# define lua_isinteger lua_isnumber
+# define SWIG_Lua_isinteger lua_isnumber
+#else
+  /* You (the user) may compile with -DSWIG_LUG_USE_STRICT_INTEGER_CHECK
+  to enforce stricter type checking to allow only integers and fail on numbers (floating point).
+  This might be hard for projects updating from pre-Lua 5.3 projects
+  because scripters may have freely mixed integers and floating point.
+  So this is off by default.
+   */
+  #if !defined(SWIG_LUG_USE_STRICT_INTEGER_CHECK)
+    #define SWIG_Lua_isinteger(L,o) \
+        (lua_isinteger(L,o) || lua_isnumber(L,o))
+  #else
+    #define SWIG_Lua_isinteger lua_isinteger
+  #endif
 #endif
 
 
