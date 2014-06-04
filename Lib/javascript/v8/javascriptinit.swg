@@ -54,9 +54,9 @@ SWIG_V8_GetModule(void *) {
 // TODO: is it ok to do that?
 extern "C"
 #if (NODE_MODULE_VERSION < 0x000C)
-void SWIGV8_INIT (v8::Handle<v8::Object> exports)
+SWIGEXPORT void SWIGV8_INIT (v8::Handle<v8::Object> exports)
 #else
-void SWIGV8_INIT (v8::Handle<v8::Object> exports, v8::Handle<v8::Object> /*module*/)
+SWIGEXPORT void SWIGV8_INIT (v8::Handle<v8::Object> exports, v8::Handle<v8::Object> /*module*/)
 #endif
 {
   SWIG_InitializeModule(static_cast<void *>(&exports));
