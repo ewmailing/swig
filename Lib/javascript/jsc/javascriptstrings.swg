@@ -53,7 +53,7 @@ SWIG_JSC_FromCharPtrAndSize(JSContextRef context, const char* carray, size_t siz
     } else {
       JSStringRef jsstring;
       if(size < 2) {
-        char c[size+1];
+        char c = (char)malloc((size+1)*sizeof(char));
         int i;
         for(i=0;i<size;++i) {
           c[i] = carray[i];
@@ -65,6 +65,7 @@ SWIG_JSC_FromCharPtrAndSize(JSContextRef context, const char* carray, size_t siz
       }
       JSValueRef result = JSValueMakeString(context, jsstring);
       JSStringRelease(jsstring);
+	  free(c);
       return result;
     }
   } else {
