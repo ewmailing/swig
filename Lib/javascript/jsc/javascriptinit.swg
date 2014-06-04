@@ -25,7 +25,7 @@ SWIG_JSC_GetModule(void) {
 extern "C" {
 #endif
 
-bool SWIGJSC_INIT (JSGlobalContextRef context, JSObjectRef *exports) {
+SWIGEXPORT int SWIGJSC_INIT (JSGlobalContextRef context, JSObjectRef *exports) {
     SWIG_InitializeModule(0);
 %}
 
@@ -59,7 +59,7 @@ bool SWIGJSC_INIT (JSGlobalContextRef context, JSObjectRef *exports) {
 
     *exports = exports_object;
 
-    return true;
+    return 1;
 }
 #ifdef __cplusplus
 }
