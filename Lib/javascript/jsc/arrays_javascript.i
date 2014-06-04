@@ -62,8 +62,9 @@
 
 %typemap(out, fragment=SWIG_From_frag(int)) int[], int[ANY] (int length = 0, int i = 0)
 {
+  JSValueRef* values;
   length = $1_dim0;
-  JSValueRef values[length];
+  values = (JSValueRef*)malloc(length*sizeof(JSValueRef));
 
   for (i = 0; i < length; i++)
   {
@@ -71,6 +72,7 @@
   }
 
   $result = JSObjectMakeArray(context, length, values, NULL);
+  free(values);
 }
 
 %typemap(in, fragment="SWIG_JSCGetNumberProperty") double[], double[ANY]
@@ -111,8 +113,9 @@
 
 %typemap(out, fragment=SWIG_From_frag(double)) double[], double[ANY] (int length = 0, int i = 0)
 {
+  JSValueRef* values;
   length = $1_dim0;
-  JSValueRef values[length];
+  values = (JSValueRef*)malloc(length*sizeof(JSValueRef));
 
   for (i = 0; i < length; i++)
   {
@@ -120,4 +123,5 @@
   }
 
   $result = JSObjectMakeArray(context, length, values, NULL);
+  free(values);
 }
