@@ -128,6 +128,10 @@ SWIGRUNTIME int SWIG_JSC_ConvertInstancePtr(JSContextRef context, JSObjectRef ob
         type_valid = true;
         break;
       }
+      else if(!strcmp(t->type->name, cdata->info->name)) {
+        type_valid = true;
+        break;
+      }
       t = t->next;
     }
     if(!type_valid) {
