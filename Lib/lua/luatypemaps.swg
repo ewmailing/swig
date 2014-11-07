@@ -19,7 +19,7 @@
 // numbers
 %typemap(in,checkfn="SWIG_Lua_isinteger") int, short, long,
              signed char, long long
-%{$1 = ($type)lua_tointeger(L, $input);%}
+%{$1 = ($type)SWIG_Lua_tointeger(L, $input);%}
 
 %typemap(in,checkfn="lua_isnumber") float, double, long double
 %{$1 = ($type)lua_tonumber(L, $input);%}
@@ -49,7 +49,7 @@ $1 = ($type)lua_tounsigned(L, $input);%}
 // (this might be ok for objects by const ref, but not for numeric primitives)
 // therefore we add a set of typemaps to fix this (for both in & out)
 %typemap(in,checkfn="SWIG_Lua_isinteger") const int&($basetype temp)
-%{ temp=($basetype)lua_tointeger(L,$input); $1=&temp;%}
+%{ temp=($basetype)SWIG_Lua_tointeger(L,$input); $1=&temp;%}
 
 %typemap(in,checkfn="SWIG_Lua_isinteger") const unsigned int&($basetype temp)
 %{SWIG_contract_assert((lua_tounsigned(L,$input)>=0),"number must not be negative")
@@ -72,16 +72,16 @@ temp=($basetype)lua_tounsigned(L,$input); $1=&temp;%}
 	VC++ .net will not allow a cast from lua_Number(double) to enum directly.
 */
 %typemap(in,checkfn="SWIG_Lua_isinteger") enum SWIGTYPE
-%{$1 = ($type)(int)lua_tointeger(L, $input);%}
+%{$1 = ($type)(int)SWIG_Lua_tointeger(L, $input);%}
 
 %typemap(out) enum SWIGTYPE
 %{  lua_pushinteger(L, (lua_Integer)(int)($1)); SWIG_arg++;%}
 
 // and const refs
 %typemap(in,checkfn="SWIG_Lua_isinteger") const enum SWIGTYPE &($basetype temp)
-%{ temp=($basetype)(int)lua_tointeger(L,$input); $1=&temp;%}
+%{ temp=($basetype)(int)SWIG_Lua_tointeger(L,$input); $1=&temp;%}
 %typemap(in,checkfn="SWIG_Lua_isinteger") const enum SWIGTYPE &&($basetype temp)
-%{ temp=($basetype)(int)lua_tointeger(L,$input); $1=&temp;%}
+%{ temp=($basetype)(int)SWIG_Lua_tointeger(L,$input); $1=&temp;%}
 %typemap(out) const enum SWIGTYPE &
 %{  lua_pushinteger(L, (lua_Integer) *$1); SWIG_arg++;%}
 %typemap(out) const enum SWIGTYPE &&
