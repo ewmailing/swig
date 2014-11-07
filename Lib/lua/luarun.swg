@@ -190,6 +190,10 @@ typedef struct swig_elua_entry {
    (Also, Lua optionally provides architecture/platform specific
    conversion routines to make conversion more efficient if you use their
    APIs instead of casting yourself.)
+
+   Lua 5.3 removed lua_pushunsigned and lua_tounsigned and maps them to other APIs. 
+   It provides an optional LUA_COMPAT_APIINTCASTS, 
+   but to be safe, we should handle the compatibility layer ourselves.
 */
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 501
 # define lua_Integer lua_Number
@@ -201,11 +205,16 @@ typedef struct swig_elua_entry {
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 502
 # define lua_Unsigned lua_Integer
-# define lua_pushunsigned lua_pushinteger
+# define SWIG_Lua_pushunsigned lua_pushinteger
 # define SWIG_Lua_tointeger lua_tointeger
-# define lua_tounsigned SWIG_Lua_tointeger
+# define SWIG_Lua_tounsigned lua_tointeger
 # define luaL_checkunsigned lua_checkinteger
 # define luaL_optunsigned luaL_optinteger
+#endif
+
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM == 502
+# define SWIG_Lua_pushunsigned lua_pushunsigned
+# define SWIG_Lua_tounsigned lua_tounsigned
 #endif
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 503
@@ -240,6 +249,14 @@ SWIGINTERN lua_Integer SWIG_Lua_tointeger(lua_State *L, int index)
 # endif
 #endif
 
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM == 503
+# define SWIG_Lua_pushunsigned(L,n) lua_pushinteger(L, (lua_Integer)(n))
+# define SWIG_Lua_tounsigned(L,i) ((lua_Integer)lua_tointegerx(L,i,NULL))
+#endif
+
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM > 503
+#error "Please define SWIG_Lua_pushunsigned and SWIG_Lua_tounsigned for this version of Lua."
+#endif
 
 /* --------------------------------------------------------------------------
  * Helper functions for error handling
