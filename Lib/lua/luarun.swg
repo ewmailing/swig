@@ -238,7 +238,7 @@ SWIGINTERN lua_Integer SWIG_Lua_tointeger(lua_State *L, int index)
 {
   lua_Integer result;
   int isnum = 0;
-  int_result = lua_tointegerx(L, index, &isnum);
+  result = lua_tointegerx(L, index, &isnum);
   if (isnum)
   {
     return result;
