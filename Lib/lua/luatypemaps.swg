@@ -27,8 +27,8 @@
 // additional check for unsigned numbers, to not permit negative input
 %typemap(in,checkfn="SWIG_Lua_isinteger") unsigned int,
              unsigned short, unsigned long, unsigned char, unsigned long long
-%{SWIG_contract_assert((lua_tounsigned(L,$input)>=0),"number must not be negative")
-$1 = ($type)lua_tounsigned(L, $input);%}
+%{SWIG_contract_assert((SWIG_Lua_tounsigned(L,$input)>=0),"number must not be negative")
+$1 = ($type)SWIG_Lua_tounsigned(L, $input);%}
 
 %typemap(out) int,short,long,
              signed char, long long
@@ -36,7 +36,7 @@ $1 = ($type)lua_tounsigned(L, $input);%}
 
 %typemap(out) unsigned int,unsigned short,unsigned long,
              unsigned char
-%{  lua_pushunsigned(L, (lua_Unsigned) $1); SWIG_arg++;%}
+%{  SWIG_Lua_pushunsigned(L, (lua_Unsigned) $1); SWIG_arg++;%}
 
 %typemap(out) float,double, long double
 %{  lua_pushnumber(L, (lua_Number) $1); SWIG_arg++;%}
@@ -52,14 +52,14 @@ $1 = ($type)lua_tounsigned(L, $input);%}
 %{ temp=($basetype)lua_tointeger(L,$input); $1=&temp;%}
 
 %typemap(in,checkfn="SWIG_Lua_isinteger") const unsigned int&($basetype temp)
-%{SWIG_contract_assert((lua_tounsigned(L,$input)>=0),"number must not be negative")
-temp=($basetype)lua_tounsigned(L,$input); $1=&temp;%}
+%{SWIG_contract_assert((SWIG_Lua_tounsigned(L,$input)>=0),"number must not be negative")
+temp=($basetype)SWIG_Lua_tounsigned(L,$input); $1=&temp;%}
 
 %typemap(out) const int&
 %{  lua_pushinteger(L, (lua_Integer) *$1); SWIG_arg++;%}
 
 %typemap(out) const unsigned int&
-%{  lua_pushunsigned(L, (lua_Unsigned) *$1); SWIG_arg++;%}
+%{  SWIG_Lua_pushunsigned(L, (lua_Unsigned) *$1); SWIG_arg++;%}
 
 // for the other numbers we can just use an apply statement to cover them
 %apply const int & {const short&,const long&,const signed char&,

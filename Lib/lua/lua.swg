@@ -170,7 +170,7 @@ use %include <std_except.i> instead
 				unsigned short&,
 				unsigned long long&,
 				unsigned char&
-%{lua_pushunsigned(L,(lua_Unsigned)$1);SWIG_fail; %}
+%{SWIG_Lua_pushunsigned(L,(lua_Unsigned)$1);SWIG_fail; %}
 
 /* Lua 5.1 introduced integer APIs so we should use them when available. */
 %typemap(throws) int,signed int,
