@@ -204,7 +204,7 @@ typedef struct swig_elua_entry {
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 501
 # define lua_Integer lua_Number
 # define lua_pushinteger lua_pushnumber
-# define lua_tointeger lua_tonumber
+# define SWIG_Lua_tointeger lua_tonumber
 # define lua_checkinteger lua_checknumber
 # define luaL_optinteger luaL_optnumber
 #endif
@@ -212,6 +212,7 @@ typedef struct swig_elua_entry {
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 502
 # define lua_Unsigned lua_Integer
 # define SWIG_Lua_pushunsigned lua_pushinteger
+# define SWIG_Lua_tointeger lua_tointeger
 # define SWIG_Lua_tounsigned lua_tointeger
 # define luaL_checkunsigned lua_checkinteger
 # define luaL_optunsigned luaL_optinteger
@@ -225,18 +226,33 @@ typedef struct swig_elua_entry {
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM < 503
 # define SWIG_Lua_isinteger lua_isnumber
 #else
-  /* You (the user) may compile with -DSWIG_LUG_USE_STRICT_INTEGER_CHECK
+  /* You (the user) may compile with -DSWIG_LUA_USE_STRICT_INTEGER_CHECK
   to enforce stricter type checking to allow only integers and fail on numbers (floating point).
   This might be hard for projects updating from pre-Lua 5.3 projects
   because scripters may have freely mixed integers and floating point.
   So this is off by default.
    */
-  #if !defined(SWIG_LUG_USE_STRICT_INTEGER_CHECK)
-    #define SWIG_Lua_isinteger(L,o) \
-        (lua_isinteger(L,o) || lua_isnumber(L,o))
-  #else
-    #define SWIG_Lua_isinteger lua_isinteger
-  #endif
+# if !defined(SWIG_LUA_USE_STRICT_INTEGER_CHECK)
+# define SWIG_Lua_isinteger lua_isnumber
+SWIGINTERN lua_Integer SWIG_Lua_tointeger(lua_State *L, int index)
+{
+  lua_Integer result;
+  int isnum = 0;
+  int_result = lua_tointegerx(L, index, &isnum);
+  if (isnum)
+  {
+    return result;
+  }
+  else
+  {
+	return (lua_Integer)lua_tonumber(L, index);
+  }
+}
+
+# else
+# define SWIG_Lua_isinteger lua_isinteger
+# define SWIG_Lua_tointeger lua_tointeger
+# endif
 #endif
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM == 503
