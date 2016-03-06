@@ -235,7 +235,7 @@ typedef struct swig_elua_entry {
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM == 503
 # define SWIG_Lua_pushunsigned(L,n) lua_pushinteger(L, (lua_Integer)(n))
-# define SWIG_Lua_tounsigned(L,i) ((lua_Integer)lua_tointegerx(L,i,NULL))
+# define SWIG_Lua_tounsigned(L,i) ((LUA_UNSIGNED)lua_tointegerx(L,i,NULL))
 #endif
 
 #if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM > 503
