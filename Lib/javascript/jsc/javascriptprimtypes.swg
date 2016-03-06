@@ -66,8 +66,7 @@ SWIG_AsVal_dec(long)(JSValueRef obj, long* val)
 SWIGINTERNINLINE JSValueRef
 SWIG_From_dec(unsigned long)(unsigned long value)
 {
-  return (value > LONG_MAX) ?
-    JSValueMakeNumber(context, value) : JSValueMakeNumber(context, %numeric_cast(value,long));
+  return JSValueMakeNumber(context, value);
 }
 }
 
@@ -80,11 +79,7 @@ SWIG_AsVal_dec(unsigned long)(JSValueRef obj, unsigned long *val)
     return SWIG_TypeError;
   }
 
-  long longVal = (long) JSValueToNumber(context, obj, NULL);
-
-  if(longVal < 0) {
-      return SWIG_OverflowError;
-  }
+  unsigned long longVal = (unsigned long) JSValueToNumber(context, obj, NULL);
 
   if(val) *val = longVal;
 
